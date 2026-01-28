@@ -224,6 +224,45 @@ footer {
 
 .splash-version { position: absolute; bottom: 10px; font-size: 10px; color: #546E7A; }
 
+/* === NOVOS ESTILOS PARA ERRO === */
+.splash-error-container {
+  display: flex; flex-direction: column; align-items: center; gap: 15px;
+  text-align: center; width: 90%; max-width: 400px;
+}
+
+.splash-error-title {
+  color: var(--error); font-size: 16px; font-weight: bold; margin: 0; letter-spacing: 1px;
+}
+
+.splash-error-desc {
+  color: #B0BEC5; font-size: 13px; line-height: 1.5; margin: 0;
+}
+.splash-error-desc b { color: #fff; }
+
+.splash-error-raw {
+  font-size: 10px; color: #546E7A; background: rgba(0,0,0,0.2); padding: 5px;
+  border-radius: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.splash-actions {
+  display: flex; gap: 15px; margin-top: 10px;
+}
+
+.btn-retry, .btn-exit {
+  padding: 8px 20px; border-radius: 4px; font-size: 12px; font-weight: bold;
+  text-transform: uppercase; cursor: pointer; transition: all 0.3s;
+}
+
+.btn-retry {
+  background: rgba(0, 229, 255, 0.1); border: 1px solid var(--accent); color: var(--accent);
+}
+.btn-retry:hover { background: var(--accent); color: #000; box-shadow: 0 0 15px rgba(0, 229, 255, 0.4); }
+
+.btn-exit {
+  background: rgba(239, 83, 80, 0.1); border: 1px solid var(--error); color: var(--error);
+}
+.btn-exit:hover { background: var(--error); color: #fff; box-shadow: 0 0 15px rgba(239, 83, 80, 0.4); }
+
 @keyframes spin { 
   0% { transform: rotate(0deg); } 
   100% { transform: rotate(360deg); } 

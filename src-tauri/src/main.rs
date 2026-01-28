@@ -87,6 +87,12 @@ fn generate_fingerprint(clean_name: &str) -> String {
 
 // --- COMANDOS TAURI ---
 
+// COMANDO NOVO PARA FECHAR O APP
+#[tauri::command]
+fn quit_app() {
+    std::process::exit(0);
+}
+
 #[tauri::command]
 async fn perform_initial_load(window: Window, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let _ = window.emit("splash-status", "Iniciando conexão segura...");
@@ -178,7 +184,6 @@ async fn fetch_dashboard_data(window: Window, state: tauri::State<'_, AppState>,
         }
     }
 
-    // AVISOS LIMPOS (SEM "FILTRANDO:")
     let _ = window.emit("splash-status", "Identificando empresa...");
     
     let db_guard = state.db.lock().await;
@@ -193,7 +198,6 @@ async fn fetch_dashboard_data(window: Window, state: tauri::State<'_, AppState>,
         _ => None
     };
     
-    // SEQUENCIAL COM DELAY E TEXTOS LIMPOS
     let _ = window.emit("splash-status", "Buscando Produção...");
     sleep(Duration::from_millis(250)).await;
     let production = db.get_production("2020-01-01", target.clone()).await.map_err(|e| e.to_string())?;
@@ -230,7 +234,8 @@ fn main() {
             fetch_dashboard_data, 
             fetch_companies, 
             perform_initial_load, 
-            finalize_startup      
+            finalize_startup,
+            quit_app // REGISTRADO AQUI
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

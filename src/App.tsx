@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
+// Removida importação de 'process' para evitar erro de permissão
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 import "./App.css";
 import { open } from '@tauri-apps/api/shell';
@@ -131,7 +132,7 @@ const ComparisonTooltip = ({ active, payload, label }: any) => {
         );
     }
     return null;
-};
+  };
 
 function App() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -154,7 +155,6 @@ function App() {
 
   const didInit = useRef(false);
 
-  // --- CARREGAMENTO INICIAL ---
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
@@ -199,7 +199,6 @@ function App() {
     return () => { if(unlisten) unlisten(); };
   }, []);
 
-  // --- FILTRO ---
   const handleFetchData = async (empresa: string) => {
       setIsLoadingData(true);
       setLoadingMsg("Buscando dados...");
@@ -283,7 +282,6 @@ function App() {
     return grouped.slice(1);
   }, [data, view, year, source, isComparisonMode]);
 
-  // --- LÓGICA DO RODAPÉ CORRIGIDA (MÉDIA PARA ANOS ANTERIORES) ---
   const footerStats = useMemo(() => {
       if (!data) return { companies: 0, equipments: 0 };
       const currentYear = new Date().getFullYear();
@@ -291,16 +289,13 @@ function App() {
 
       if (view === 'production') {
           if (year === currentYear) {
-              // Ano Atual: Soma normal (como estava antes, pois o usuário disse que estava certo)
               totalEquipments = chartData.reduce((acc, curr) => acc + (curr.devices || 0), 0);
           } else {
-              // Anos Passados: Média Mensal (Soma total / meses com dados)
               const validMonths = chartData.filter(d => d.devices > 0).length;
               const sumDevices = chartData.reduce((acc, curr) => acc + (curr.devices || 0), 0);
               totalEquipments = validMonths > 0 ? Math.round(sumDevices / validMonths) : 0;
           }
       } else {
-          // Comunicação: Média também faz mais sentido que soma para histórico
           if (year === currentYear) {
              totalEquipments = chartData.reduce((acc, curr) => acc + (curr.total_devs || 0), 0);
           } else {
@@ -324,8 +319,28 @@ function App() {
           <div className="splash-icon-box">{splashError ? <div className="splash-error-mark">!</div> : <div className="splash-spinner"></div>}</div>
           <h1 className="splash-title">MONITORAMENTO RPA</h1>
           {!splashError && <p className="splash-status">{splashStatus}</p>}
-          <div className="splash-progress-bg"><div className={`splash-progress-fill ${splashError ? 'error' : ''}`} style={{ width: `${splashProgress}%` }}></div></div>
-          {splashError && <button className="btn-retry" onClick={() => window.location.reload()} style={{marginTop:20}}>Tentar Novamente</button>}
+          
+          {!splashError && (
+              <div className="splash-progress-bg">
+                  <div className={`splash-progress-fill`} style={{ width: `${splashProgress}%` }}></div>
+              </div>
+          )}
+          
+          {splashError && (
+              <div className="splash-error-container">
+                 <p className="splash-error-title">FALHA NA CONEXÃO</p>
+                 <p className="splash-error-desc">
+                    Não foi possível acessar o banco de dados.<br/>
+                    <b>Verifique se a VPN está conectada.</b>
+                 </p>
+                 
+                 <div className="splash-actions">
+                     <button className="btn-retry" onClick={() => window.location.reload()}>Tentar Novamente</button>
+                     <button className="btn-exit" onClick={() => invoke("quit_app")}>Sair do Programa</button>
+                 </div>
+              </div>
+          )}
+          
           <div className="splash-version">v1.0.0 • Rust + SQLx</div>
         </div>
       )}
@@ -345,15 +360,11 @@ function App() {
         <header>
           <div className="left-controls">
             <div className="view-selector">
-              {/* GRUPO DE PRODUÇÃO (DEMARCADO VISUALMENTE) */}
               <div className="btn-group-prod">
                   <button onClick={() => { setView('production'); setIsComparisonMode(false); }} className={view === 'production' && !isComparisonMode ? 'active' : ''}>Produção</button>
                   <button onClick={() => { setView('production'); setIsComparisonMode(!isComparisonMode); }} className={isComparisonMode ? 'toggle-active' : ''} title="Comparar com ano anterior">Ano a Ano</button>
               </div>
-              
               <div className="btn-divider"></div>
-
-              {/* BOTÃO DE COMUNICAÇÃO (SEPARADO) */}
               <button onClick={() => setView('communication')} className={view === 'communication' ? 'active' : ''}>Comunicação</button>
             </div>
           </div>
