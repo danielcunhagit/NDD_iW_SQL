@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 
-// Adicionei 'Clone' aqui
+// --- ESTRUTURAS EXISTENTES ---
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct ProductionRecord {
     pub source: String,
@@ -11,7 +11,6 @@ pub struct ProductionRecord {
     pub devices: i32,
 }
 
-// Adicionei 'Clone' aqui
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct CommunicationRecord {
     pub source: String,
@@ -21,7 +20,6 @@ pub struct CommunicationRecord {
     pub disconnected: i32,
 }
 
-// Adicionei 'Clone' aqui
 #[derive(Debug, Serialize, Clone)]
 pub struct DashboardData {
     pub production: Vec<ProductionRecord>,
@@ -29,13 +27,40 @@ pub struct DashboardData {
     pub last_update_ndd: String,
     pub last_update_iw: String,
     pub projection: ProjectionData,
+    // NOVOS CAMPOS PARA O RODAPÉ
+    pub total_equipments: i64,
+    pub total_companies: i64,
 }
 
-// Adicionei 'Clone' aqui
 #[derive(Debug, Serialize, Default, Clone)]
 pub struct ProjectionData {
     pub ndd_pb: i64,
     pub ndd_cor: i64,
     pub iw_pb: i64,
     pub iw_cor: i64,
+}
+
+#[derive(Debug, Serialize, Default, Clone)]
+pub struct MonitoringData {
+    pub mif: i64,
+    pub compatible: i64,
+    pub not_compatible: i64,
+    pub registered: i64,
+    pub not_registered: i64,
+    pub ndd: i64,
+    pub iw: i64,
+    pub possible: i64,
+    pub not_possible: i64,
+    pub possible_canon: i64,
+    pub possible_inter: i64,
+    pub last_date: String,
+}
+
+#[derive(sqlx::FromRow)]
+pub struct IwRawData {
+    pub serial: String,
+    pub compativel: Option<String>,
+    pub cadastrado: Option<String>,
+    pub possivel: Option<String>,
+    pub status: Option<String>,
 }
