@@ -1,6 +1,5 @@
 use serde::{Serialize, Deserialize};
 
-// --- ESTRUTURAS EXISTENTES ---
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct ProductionRecord {
     pub source: String,
@@ -27,7 +26,6 @@ pub struct DashboardData {
     pub last_update_ndd: String,
     pub last_update_iw: String,
     pub projection: ProjectionData,
-    // NOVOS CAMPOS PARA O RODAPÉ
     pub total_equipments: i64,
     pub total_companies: i64,
 }
@@ -63,4 +61,25 @@ pub struct IwRawData {
     pub cadastrado: Option<String>,
     pub possivel: Option<String>,
     pub status: Option<String>,
+}
+
+// Detalhes Individuais (Quando filtra uma empresa)
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
+pub struct DeviceDetail {
+    pub source: String,
+    pub serial: String,
+    pub empresa: Option<String>,
+    pub pb: i64,
+    pub cor: i64,
+    pub total: i64,
+}
+
+// Resumo por Empresa (Visão Geral - Req 4 e 5)
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
+pub struct CompanySummary {
+    pub source: String,
+    pub empresa: String,
+    pub online: i32,  // <= 7 dias
+    pub offline: i32, // > 7 dias
+    pub producao: i64,
 }

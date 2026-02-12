@@ -4,7 +4,8 @@ mod models;
 mod db;
 
 use db::Database;
-use models::{DashboardData, ProjectionData, ProductionRecord, MonitoringData};
+// Certifique-se de que CompanySummary está aqui
+use models::{DashboardData, ProjectionData, ProductionRecord, MonitoringData, DeviceDetail, CompanySummary};
 use tauri::{Window, Size, LogicalSize, Manager, AppHandle};
 use tokio::sync::Mutex;
 use chrono::{Datelike, Local, NaiveDate};
@@ -17,10 +18,10 @@ struct AppState {
     cache: Mutex<Option<DashboardData>>,
     monitoring_cache: Mutex<Option<MonitoringData>>,
     companies_map_cache: Mutex<Option<HashMap<String, Vec<String>>>>,
+    companies_cache_year: Mutex<Option<i32>>,
 }
 
 // --- FUNÇÕES AUXILIARES ---
-
 fn days_in_month(year: i32, month: u32) -> i64 {
     use chrono::NaiveDate;
     let next_month = if month == 12 { 1 } else { month + 1 };
@@ -83,12 +84,44 @@ fn calculate_smart_projection(
 fn clean_name_for_display(raw: &str) -> String {
     let sanitized = raw.replace('\u{00A0}', " ");
     let mut name = sanitized.to_uppercase();
+
+    if let Some(idx) = name.find(" - ") {
+        name = name[..idx].to_string();
+    }
+
+    name = name.trim_matches(|c| c == '-' || c == '.' || c == ',' || c == ' ').to_string();
+
     let re_valid = Regex::new(r"[^A-Z0-9\s&-]").unwrap();
     name = re_valid.replace_all(&name, " ").to_string();
-    let suffixes = [" S A", " SA", " S/A", " LTDA", " LIMITADA", " EIRELI", " ME", " EPP", " INC", " LLC", " COMERCIO E INDUSTRIA", " INDUSTRIA E COMERCIO", " COM E IND"];
-    for suffix in suffixes {
-        if name.ends_with(suffix) { name = name[..name.len() - suffix.len()].to_string(); }
+
+    let suffixes = [
+        " S A", " S.A.", " S.A", " SA", " S/A", 
+        " LTDA", " LIMITADA", 
+        " EIRELI", 
+        " ME", " EPP", 
+        " INC", " LLC", 
+        " S.S.", " SS", 
+        " COMERCIO E INDUSTRIA", " INDUSTRIA E COMERCIO", " COM E IND",
+        " - FILIAL", " - MATRIZ"
+    ];
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let original_len = name.len();
+        
+        for suffix in suffixes.iter() {
+            if name.ends_with(suffix) {
+                name = name[..name.len() - suffix.len()].to_string();
+                name = name.trim_end_matches(|c| c == '-' || c == '.' || c == ',' || c == ' ').to_string();
+                changed = true;
+                break;
+            }
+        }
+        
+        if name.len() == original_len { changed = false; }
     }
+
     Regex::new(r"\s+").unwrap().replace_all(&name, " ").trim().to_string()
 }
 
@@ -96,11 +129,18 @@ fn generate_fingerprint(clean_name: &str) -> String {
     Regex::new(r"[^A-Z0-9]").unwrap().replace_all(clean_name, "").to_string()
 }
 
-async fn get_or_create_company_map(state: tauri::State<'_, AppState>) -> Result<HashMap<String, Vec<String>>, String> {
+// --- GERENCIAMENTO DE CACHE DE EMPRESAS ---
+async fn get_or_create_company_map(state: tauri::State<'_, AppState>, year: i32) -> Result<HashMap<String, Vec<String>>, String> {
     {
         let cache_guard = state.companies_map_cache.lock().await;
-        if let Some(map) = cache_guard.as_ref() { return Ok(map.clone()); }
+        let year_guard = state.companies_cache_year.lock().await;
+        if let (Some(map), Some(cached_year)) = (cache_guard.as_ref(), year_guard.as_ref()) {
+            if *cached_year == year {
+                return Ok(map.clone());
+            }
+        }
     }
+
     let mut db_guard = state.db.lock().await;
     if db_guard.is_none() {
          let conn_str = "mssql://ndd_viewer:ioas%21%40%23ibusad%24%25%24%21%40asd3@192.168.41.22/Db_RPA?encrypt=true&trustServerCertificate=true";
@@ -108,7 +148,9 @@ async fn get_or_create_company_map(state: tauri::State<'_, AppState>) -> Result<
          *db_guard = Some(db);
     }
     let db = db_guard.as_ref().unwrap();
-    let raw_companies = db.get_raw_companies_with_data("Consolidado").await.map_err(|e| e.to_string())?;
+    
+    let raw_companies = db.get_active_companies_in_year(year).await.map_err(|e| e.to_string())?;
+    
     let mut temp_map: HashMap<String, (String, Vec<String>)> = HashMap::new();
     for (raw, _) in raw_companies {
         let display = clean_name_for_display(&raw);
@@ -122,18 +164,53 @@ async fn get_or_create_company_map(state: tauri::State<'_, AppState>) -> Result<
     }
     let mut final_map: HashMap<String, Vec<String>> = HashMap::new();
     for (_, (display, raw_list)) in temp_map { final_map.insert(display, raw_list); }
+    
     let mut cache_guard = state.companies_map_cache.lock().await;
+    let mut year_guard = state.companies_cache_year.lock().await;
     *cache_guard = Some(final_map.clone());
+    *year_guard = Some(year);
+    
     Ok(final_map)
 }
 
 #[tauri::command]
 fn quit_app() { std::process::exit(0); }
 
+// --- COMANDO FALTANTE ADICIONADO AQUI ---
+#[tauri::command]
+async fn fetch_month_summary_cmd(state: tauri::State<'_, AppState>, year: i32, month: i32) -> Result<Vec<CompanySummary>, String> {
+    let db_guard = state.db.lock().await;
+    let db = db_guard.as_ref().ok_or("Erro de conexão")?;
+    let summary = db.get_month_company_summary(year, month).await.map_err(|e| e.to_string())?;
+    Ok(summary)
+}
+
+#[tauri::command]
+async fn fetch_month_details_cmd(state: tauri::State<'_, AppState>, year: i32, month: i32, company: Option<String>) -> Result<Vec<DeviceDetail>, String> {
+    let target_raw_names = if let Some(comp_name) = company.as_deref() {
+        if !comp_name.trim().is_empty() {
+            let map = get_or_create_company_map(state.clone(), year).await?;
+            map.get(comp_name).cloned() 
+        } else { None }
+    } else { None };
+
+    let db_guard = state.db.lock().await;
+    let db = db_guard.as_ref().ok_or("Erro de conexão")?;
+    let details = db.get_month_details(year, month, target_raw_names).await.map_err(|e| e.to_string())?;
+    Ok(details)
+}
+
+#[tauri::command]
+async fn fetch_companies(state: tauri::State<'_, AppState>, year: i32) -> Result<Vec<String>, String> {
+    let map = get_or_create_company_map(state, year).await?;
+    let mut list: Vec<String> = map.keys().cloned().collect();
+    list.sort();
+    Ok(list)
+}
+
 #[tauri::command]
 async fn perform_initial_load(app: AppHandle, window: Window, state: tauri::State<'_, AppState>) -> Result<DashboardData, String> {
     println!(">>> [INIT] Iniciando...");
-    
     let _ = window.emit("splash-status", "Conectando ao banco de dados...");
     sleep(Duration::from_millis(500)).await;
 
@@ -167,10 +244,6 @@ async fn perform_initial_load(app: AppHandle, window: Window, state: tauri::Stat
     let (total_equipments, total_companies) = stats_res.map_err(|e| e.to_string())?;
     let (last_update_ndd, last_update_iw) = dates_data;
 
-    // --- LOG SOLICITADO ---
-    println!(">>> [DB DATA] Última NDD: {} | Última iW: {}", last_update_ndd, last_update_iw);
-    // ----------------------
-
     let _ = window.emit("splash-status", "Calculando projeções do mês...");
     sleep(Duration::from_millis(500)).await;
     
@@ -188,8 +261,10 @@ async fn perform_initial_load(app: AppHandle, window: Window, state: tauri::Stat
 
     let app_clone = app.clone(); 
     tokio::spawn(async move {
+        let _ = app_clone.emit_all("loading-status", "Otimizando lista de empresas...");
         let state = app_clone.state::<AppState>();
-        let _ = get_or_create_company_map(state).await;
+        let _ = get_or_create_company_map(state, current_year).await;
+        let _ = app_clone.emit_all("companies-ready", ());
     });
 
     let _ = window.emit("splash-status", "Pronto!");
@@ -236,15 +311,7 @@ async fn finalize_startup(window: Window) {
 }
 
 #[tauri::command]
-async fn fetch_companies(state: tauri::State<'_, AppState>, _source_filter: String) -> Result<Vec<String>, String> {
-    let map = get_or_create_company_map(state).await?;
-    let mut list: Vec<String> = map.keys().cloned().collect();
-    list.sort();
-    Ok(list)
-}
-
-#[tauri::command]
-async fn fetch_dashboard_data(window: Window, state: tauri::State<'_, AppState>, company: Option<String>) -> Result<DashboardData, String> {
+async fn fetch_dashboard_data(window: Window, state: tauri::State<'_, AppState>, year: i32, company: Option<String>) -> Result<DashboardData, String> {
     if company.is_none() {
         let cache = state.cache.lock().await;
         if let Some(data) = cache.as_ref() { return Ok(data.clone()); }
@@ -254,7 +321,7 @@ async fn fetch_dashboard_data(window: Window, state: tauri::State<'_, AppState>,
     
     let target_raw_names = if let Some(comp_name) = company.as_deref() {
         if !comp_name.trim().is_empty() {
-            let map = get_or_create_company_map(state.clone()).await?;
+            let map = get_or_create_company_map(state.clone(), year).await?;
             map.get(comp_name).cloned() 
         } else { None }
     } else { None };
@@ -267,19 +334,13 @@ async fn fetch_dashboard_data(window: Window, state: tauri::State<'_, AppState>,
     let db = db_guard.as_ref().ok_or("Erro de conexão")?;
     
     let _ = window.emit("splash-status", "Buscando histórico de Produção...");
-    let start_year = 2020;
-    
-    let production = db.get_production_current(start_year, target_raw_names.clone()).await.map_err(|e| e.to_string())?;
+    let production = db.get_production_current(2020, target_raw_names.clone()).await.map_err(|e| e.to_string())?;
 
     let _ = window.emit("splash-status", "Buscando histórico de Comunicação...");
-    let communication = db.get_communication_current(start_year, target_raw_names).await.map_err(|e| e.to_string())?;
+    let communication = db.get_communication_current(2020, target_raw_names).await.map_err(|e| e.to_string())?;
 
     let (last_update_ndd, last_update_iw) = tokio::join!(db.get_last_date("vw_NDD"), db.get_last_date("vw_IW_Main"));
     
-    // --- LOG SOLICITADO NO FILTRO ---
-    println!(">>> [DB DATA FILTER] Última NDD: {} | Última iW: {}", last_update_ndd, last_update_iw);
-    // --------------------------------
-
     let total_equipments = production.iter().filter(|p| p.ano == Local::now().year()).map(|p| p.devices as i64).max().unwrap_or(0);
     let total_companies = if company.is_some() { 1 } else { 0 };
 
@@ -313,14 +374,14 @@ async fn fetch_monitoring_data(window: Window, state: tauri::State<'_, AppState>
 fn main() {
     tauri::Builder::default()
         .manage(AppState { 
-            db: Mutex::new(None), 
-            cache: Mutex::new(None), 
-            monitoring_cache: Mutex::new(None),
-            companies_map_cache: Mutex::new(None) 
+            db: Mutex::new(None), cache: Mutex::new(None), 
+            monitoring_cache: Mutex::new(None), companies_map_cache: Mutex::new(None),
+            companies_cache_year: Mutex::new(None)
         })
         .invoke_handler(tauri::generate_handler![
             fetch_dashboard_data, fetch_companies, perform_initial_load, 
-            fetch_full_history, finalize_startup, quit_app, fetch_monitoring_data
+            fetch_full_history, finalize_startup, quit_app, fetch_monitoring_data,
+            fetch_month_details_cmd, fetch_month_summary_cmd // <--- ESSENCIAL
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

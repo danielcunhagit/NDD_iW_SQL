@@ -11,7 +11,7 @@ impl Database {
     pub async fn new(conn_str: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let pool = MssqlPoolOptions::new()
             .max_connections(10) 
-            .acquire_timeout(std::time::Duration::from_secs(5)) 
+            .acquire_timeout(std::time::Duration::from_secs(5)) // Timeout de 5s para detectar queda de VPN
             .connect(conn_str)
             .await?;
         Ok(Self { pool })
@@ -32,9 +32,141 @@ impl Database {
         name.trim().to_string()
     }
 
-    // --- FETCH PROD (MANTIDO COM A REGRA DE DEDUPLICAÇÃO iW/NDD) ---
+    // ==================================================================================
+    // 1. FUNÇÕES DO PAINEL LATERAL (SIDE PANEL) - PRECISAS E BLINDADAS
+    // ==================================================================================
+
+    // Filtro de Empresas: Retorna apenas empresas com produção > 0 no ANO específico
+    pub async fn get_active_companies_in_year(&self, year: i32) -> Result<Vec<(String, i64)>, Box<dyn Error + Send + Sync>> {
+        let query = format!(r#"
+            SELECT empresa, SUM(cnt) as cnt 
+            FROM (
+                SELECT EnterpriseName as empresa, COUNT(*) as cnt, SUM(ISNULL(pb_total, 0) + ISNULL(cor_total, 0)) as prod_total
+                FROM vw_NDD 
+                WHERE YEAR(data) = {}
+                GROUP BY EnterpriseName
+                HAVING SUM(ISNULL(pb_total, 0) + ISNULL(cor_total, 0)) > 0
+
+                UNION ALL
+
+                SELECT [Ship To Name] as empresa, COUNT(*) as cnt, SUM(ISNULL(pb_total, 0) + ISNULL(cor_total, 0)) as prod_total
+                FROM vw_IW_Main 
+                WHERE YEAR(data) = {}
+                GROUP BY [Ship To Name]
+                HAVING SUM(ISNULL(pb_total, 0) + ISNULL(cor_total, 0)) > 0
+            ) as AllComps
+            GROUP BY empresa 
+            ORDER BY empresa
+        "#, year, year);
+        
+        let rows: Vec<(String, i32)> = sqlx::query_as(&query).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(n, c)| (n, c as i64)).collect())
+    }
+
+    // Resumo Mensal (Ranking Online/Offline) - COM DEDUPLICAÇÃO E SEGURANÇA NULL
+    pub async fn get_month_company_summary(&self, year: i32, month: i32) -> Result<Vec<crate::models::CompanySummary>, Box<dyn Error + Send + Sync>> {
+        let query = format!(r#"
+            WITH CombinedData AS (
+                -- NDD
+                SELECT 
+                    'NDD' as source, 
+                    ISNULL(EnterpriseName, 'N/D') as empresa, 
+                    SerialNumber as serial,
+                    (CAST(ISNULL(pb_total, 0) as bigint) + CAST(ISNULL(cor_total, 0) as bigint)) as prod,
+                    CASE WHEN [Days without meters] <= 7 THEN 1 ELSE 0 END as is_online,
+                    ROW_NUMBER() OVER(PARTITION BY SerialNumber ORDER BY data DESC) as rn
+                FROM vw_NDD
+                WHERE YEAR(data) = {} AND MONTH(data) = {}
+
+                UNION ALL
+
+                -- iW (Aqui fazemos a deduplicação pois o escopo é pequeno: 1 mês)
+                SELECT 
+                    'IW' as source, 
+                    ISNULL([Ship To Name], 'N/D') as empresa, 
+                    [Serial#] as serial,
+                    (CAST(ISNULL(pb_total, 0) as bigint) + CAST(ISNULL(cor_total, 0) as bigint)) as prod,
+                    CASE WHEN [Lapsed Days] <= 7 THEN 1 ELSE 0 END as is_online,
+                    ROW_NUMBER() OVER(PARTITION BY [Serial#] ORDER BY data DESC) as rn
+                FROM vw_IW_Main w
+                WHERE YEAR(data) = {} AND MONTH(data) = {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM vw_NDD n 
+                    WHERE n.SerialNumber = w.[Serial#] 
+                    AND YEAR(n.data) = YEAR(w.data) 
+                    AND MONTH(n.data) = MONTH(w.data)
+                    AND (ISNULL(n.pb_total, 0) + ISNULL(n.cor_total, 0)) > 0
+                )
+            )
+            SELECT 
+                source, 
+                empresa,
+                COUNT(CASE WHEN rn = 1 AND is_online = 1 THEN 1 END) as online,
+                COUNT(CASE WHEN rn = 1 AND is_online = 0 THEN 1 END) as offline,
+                CAST(ISNULL(SUM(prod), 0) AS BIGINT) as producao
+            FROM CombinedData
+            GROUP BY source, empresa
+            ORDER BY offline DESC, producao DESC
+        "#, year, month, year, month);
+
+        let records = sqlx::query_as::<_, crate::models::CompanySummary>(&query).fetch_all(&self.pool).await?;
+        Ok(records)
+    }
+
+    // Detalhes do Mês
+    pub async fn get_month_details(&self, year: i32, month: i32, company_filter: Option<Vec<String>>) -> Result<Vec<crate::models::DeviceDetail>, Box<dyn Error + Send + Sync>> {
+        let iw_exclusion = r#"
+            AND NOT EXISTS (
+                SELECT 1 FROM vw_NDD n 
+                WHERE n.SerialNumber = w.[Serial#] 
+                AND YEAR(n.data) = YEAR(w.data) 
+                AND MONTH(n.data) = MONTH(w.data)
+                AND (ISNULL(n.pb_total, 0) + ISNULL(n.cor_total, 0)) > 0
+            )
+        "#;
+
+        let mut query = format!(r#"
+            SELECT source, serial, empresa, 
+                   SUM(pb) as pb, 
+                   SUM(cor) as cor, 
+                   SUM(pb + cor) as total
+            FROM (
+                SELECT 'NDD' as source, SerialNumber as serial, EnterpriseName as empresa, 
+                       CAST(ISNULL(pb_total, 0) as bigint) as pb, 
+                       CAST(ISNULL(cor_total, 0) as bigint) as cor
+                FROM vw_NDD 
+                WHERE YEAR(data) = {} AND MONTH(data) = {}
+
+                UNION ALL
+
+                SELECT 'IW' as source, [Serial#] as serial, [Ship To Name] as empresa, 
+                       CAST(ISNULL(pb_total, 0) as bigint) as pb, 
+                       CAST(ISNULL(cor_total, 0) as bigint) as cor
+                FROM vw_IW_Main w 
+                WHERE YEAR(data) = {} AND MONTH(data) = {} {}
+            ) as Details
+            WHERE 1=1
+        "#, year, month, year, month, iw_exclusion);
+
+        if let Some(companies) = company_filter {
+            if !companies.is_empty() {
+                let list_str = companies.iter().map(|c| format!("'{}'", c.replace("'", "''"))).collect::<Vec<_>>().join(",");
+                query.push_str(&format!(" AND empresa IN ({})", list_str));
+            }
+        }
+
+        query.push_str(" GROUP BY source, serial, empresa ORDER BY total DESC");
+
+        let records = sqlx::query_as::<_, crate::models::DeviceDetail>(&query).fetch_all(&self.pool).await?;
+        Ok(records)
+    }
+
+    // ==================================================================================
+    // 2. FUNÇÕES DE GRÁFICOS (OTIMIZADAS PARA PERFORMANCE)
+    // ==================================================================================
+
     async fn fetch_prod(&self, where_clause: &str, company_filter: Option<Vec<String>>) -> Result<Vec<crate::models::ProductionRecord>, Box<dyn Error + Send + Sync>> {
-        // REGRA: Remover iW se existir NDD com produção > 0 no mesmo período
+        // Para Produção, a exclusão é necessária para não inflar o faturamento, mas usaremos uma lógica simplificada se necessário
         let iw_exclusion = r#"
             AND NOT EXISTS (
                 SELECT 1 FROM vw_NDD n 
@@ -83,11 +215,10 @@ impl Database {
         self.fetch_prod(&where_clause, None).await
     }
 
-    // --- FETCH COMM ATUALIZADO: FILTRO POR DATA MÁXIMA MENSAL ---
+    // --- CORREÇÃO DE PERFORMANCE: FETCH COMM SEM DEDUPLICAÇÃO PESADA ---
+    // Removemos o 'NOT EXISTS' daqui para evitar o travamento ("Infinite Load").
+    // O gráfico mostrará a soma de NDD + iW. A deduplicação exata fica no Side Panel.
     async fn fetch_comm(&self, where_clause: &str, company_filter: Option<Vec<String>>) -> Result<Vec<crate::models::CommunicationRecord>, Box<dyn Error + Send + Sync>> {
-        // Correção: Adicionado "WHERE data IN (SELECT MAX(data)...)" para pegar apenas o retrato do fim do mês
-        // NDD: [Days without meters] <= 7 -> ON
-        // iW:  [Lapsed Days] <= 7 -> ON
         let mut query = format!(r#"
             SELECT source, ano, mes, 
                    COUNT(DISTINCT CASE WHEN is_connected = 1 THEN serial END) as connected, 
@@ -106,6 +237,7 @@ impl Database {
                 FROM vw_IW_Main 
                 WHERE data IN (SELECT MAX(data) FROM vw_IW_Main GROUP BY YEAR(data), MONTH(data))
                 AND {}
+                -- REMOVIDO 'NOT EXISTS' PARA EVITAR TIMEOUT NA CARGA INICIAL
             ) as CommData WHERE 1=1
         "#, where_clause, where_clause);
 
@@ -162,48 +294,48 @@ impl Database {
         let query = String::from(r#"
             SELECT empresa, SUM(cnt) as cnt 
             FROM (
-                SELECT EnterpriseName as empresa, COUNT(*) as cnt FROM vw_NDD GROUP BY EnterpriseName
+                SELECT EnterpriseName as empresa, COUNT(*) as cnt, SUM(ISNULL(pb_total, 0) + ISNULL(cor_total, 0)) as prod_total
+                FROM vw_NDD 
+                GROUP BY EnterpriseName
+                HAVING SUM(ISNULL(pb_total, 0) + ISNULL(cor_total, 0)) > 0
+
                 UNION ALL
-                SELECT [Ship To Name] as empresa, COUNT(*) as cnt FROM vw_IW_Main GROUP BY [Ship To Name]
+
+                SELECT [Ship To Name] as empresa, COUNT(*) as cnt, SUM(ISNULL(pb_total, 0) + ISNULL(cor_total, 0)) as prod_total
+                FROM vw_IW_Main 
+                GROUP BY [Ship To Name]
+                HAVING SUM(ISNULL(pb_total, 0) + ISNULL(cor_total, 0)) > 0
             ) as AllComps
             GROUP BY empresa 
             ORDER BY empresa
         "#);
+        
         let rows: Vec<(String, i32)> = sqlx::query_as(&query).fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(|(n, c)| (n, c as i64)).collect())
     }
 
     pub async fn get_monitoring_stats(&self) -> Result<crate::models::MonitoringData, Box<dyn Error + Send + Sync>> {
         let max_date_str: String = sqlx::query_scalar("SELECT CONVERT(varchar, MAX(data), 23) FROM vw_IW_Main").fetch_one(&self.pool).await.unwrap_or("N/D".to_string());
-        
         let sql_ndd = "SELECT DISTINCT UPPER(RTRIM(LTRIM(SerialNumber))) FROM vw_NDD WHERE data = (SELECT MAX(data) FROM vw_NDD)";
         let ndd_rows: Vec<String> = sqlx::query_scalar(sql_ndd).fetch_all(&self.pool).await?;
         let ndd_set: HashSet<String> = ndd_rows.into_iter().collect();
-
         let sql_iw = r#"SELECT UPPER(RTRIM(LTRIM([Serial#]))) as serial, LOWER(CAST([Compativel iW] as varchar)) as compativel, LOWER(CAST([Cadastrado no iW] as varchar)) as cadastrado, LOWER(CAST([Possível cadastrar iW] as varchar)) as possivel, CAST([status] as varchar) as status FROM vw_IW_Main WHERE data = (SELECT MAX(data) FROM vw_IW_Main)"#;
         let iw_rows: Vec<crate::models::IwRawData> = sqlx::query_as(sql_iw).fetch_all(&self.pool).await?;
-
         let mut iw_serials_map: HashMap<String, crate::models::IwRawData> = HashMap::new();
         for row in iw_rows { iw_serials_map.insert(row.serial.clone(), row); }
-
         let mif = iw_serials_map.len() as i64;
         let mut compatible = 0; let mut not_compatible = 0; let mut registered = 0; let mut not_registered = 0;
         let mut possible = 0; let mut not_possible = 0; let mut possible_canon = 0; let mut possible_inter = 0; let mut iw_only = 0;
-
         let is_sim = |opt: &Option<String>| -> bool { if let Some(s) = opt { let v = s.trim().to_lowercase(); v == "sim" || v == "s" || v == "1" || v == "yes" } else { false } };
-
         for (serial, row) in &iw_serials_map {
             let is_in_ndd = ndd_set.contains(serial);
             let comp_iw = is_sim(&row.compativel); let cad_iw = is_sim(&row.cadastrado); let poss_iw = is_sim(&row.possivel);
-
             if comp_iw || is_in_ndd { compatible += 1; } else { not_compatible += 1; }
             if cad_iw || is_in_ndd { registered += 1; if cad_iw && !is_in_ndd { iw_only += 1; } } 
             else { not_registered += 1; if poss_iw { possible += 1; let st = row.status.as_deref().unwrap_or("").to_lowercase(); if st.contains("canon") { possible_canon += 1; } if st.contains("inter") { possible_inter += 1; } } else { not_possible += 1; } }
         }
-
         let mut ndd_in_mif = 0;
         for s in &ndd_set { if iw_serials_map.contains_key(s) { ndd_in_mif += 1; } }
-
         Ok(crate::models::MonitoringData { mif, compatible, not_compatible, registered, not_registered, ndd: ndd_in_mif, iw: iw_only, possible, not_possible, possible_canon, possible_inter, last_date: max_date_str })
     }
 }
