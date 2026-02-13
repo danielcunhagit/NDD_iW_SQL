@@ -59,7 +59,81 @@ const formatDate = (dateStr: string | undefined) => { if (!dateStr || dateStr ==
 
 // ... (MonitoringView, RenderLabels e Tooltips MANTIDOS IGUAIS para economizar espaço aqui, mas devem estar no arquivo) ...
 // CÓPIA DOS COMPONENTES VISUAIS (Mantenha os que você já tem: MonitoringView, RenderPBLabel, DefaultTooltip, etc)
-const MonitoringView = ({ data }: { data: MonitoringData | null }) => { if (!data) return <div style={{display:'flex', height:'100%', alignItems:'center', justifyContent:'center', color:'#B0BEC5'}}>Carregando diagrama...</div>; const ProCard = ({ title, value, total, status = "neutral", hasNext = false }: any) => { const pct = total > 0 ? Math.round((value / total) * 100) : 0; return ( <div className={`flow-card status-${status} ${hasNext ? 'has-next' : ''} expand`}> <div className="card-header"><span className="card-title">{title}</span>{total > 0 && total !== value && <span className="card-pct">{pct}%</span>}</div> <div className="card-body"><span className="card-value">{fmtMilhar(value)}</span><span className="card-label">eqp</span></div> </div> ); }; return ( <div className="monitoring-container"> <div className="col-level" style={{flex: 0.8}}><ProCard title="Parque Total (MIF)" value={data.mif} status="main" hasNext={true} /></div> <div className="col-level"> <div className="card-group grouped"><ProCard title="Compatíveis" value={data.compatible} total={data.mif} status="good" hasNext={true} /></div> <div className="card-group grouped"><ProCard title="Incompatíveis" value={data.not_compatible} total={data.mif} status="bad" /></div> </div> <div className="col-level"> <div className="card-group grouped" style={{flexGrow: 1.5}}><ProCard title="Monitorados" value={data.registered} total={data.compatible} status="good" hasNext={true} /></div> <div className="card-group grouped" style={{flexGrow: 1}}><ProCard title="Sem Monitoramento" value={data.not_registered} total={data.compatible} status="warn" hasNext={true} /></div> <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div> </div> <div className="col-level"> <div className="card-group grouped" style={{flexGrow: 1.5}}> <ProCard title="NDD Print" value={data.ndd} total={data.registered} status="neutral" /> <ProCard title="Apenas iW" value={data.iw} total={data.registered} status="neutral" /> </div> <div className="card-group grouped" style={{flexGrow: 1}}> <div style={{display:'flex', flexDirection:'column', gap: 5, padding:'8px', background:'rgba(0,0,0,0.2)', borderRadius:4, border:'1px solid #546E7A', marginBottom: 5}}> <div style={{fontSize:9, color:'#B0BEC5', fontWeight:'bold', marginBottom:2, textAlign:'center'}}>OPORTUNIDADES (POSSÍVEL)</div> <div style={{display:'flex', gap:5}}> <div style={{flex:1}}><ProCard title="Canon" value={data.possible_canon} status="good" /></div> <div style={{flex:1}}><ProCard title="Inter" value={data.possible_inter} status="warn" /></div> </div> </div> <ProCard title="Não Possível" value={data.not_possible} total={data.not_registered} status="bad" /> </div> <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div> </div> <div style={{position:'absolute', bottom: 10, right: 20, fontSize: 10, color: '#546E7A'}}>Ref: {formatDate(data.last_date)}</div> </div> ); };
+const MonitoringView = ({ data }: { data: MonitoringData | null }) => {
+    if (!data) return <div style={{display:'flex', height:'100%', alignItems:'center', justifyContent:'center', color:'#B0BEC5'}}>Carregando diagrama...</div>;
+
+    const ProCard = ({ title, value, total, status = "neutral", hasNext = false }: any) => {
+        const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+        return (
+            <div className={`flow-card status-${status} ${hasNext ? 'has-next' : ''} expand`}>
+                <div className="card-header">
+                    <span className="card-title">{title}</span>
+                    {total > 0 && total !== value && <span className="card-pct">{pct}%</span>}
+                </div>
+                <div className="card-body">
+                    <span className="card-value">{fmtMilhar(value)}</span>
+                    <span className="card-label">eqp</span>
+                </div>
+            </div>
+        );
+    };
+
+    return (
+        <div className="monitoring-container">
+            {/* Nível 1: Total */}
+            <div className="col-level" style={{flex: 0.8}}>
+                <ProCard title="Parque Total (MIF)" value={data.mif} status="main" hasNext={true} />
+            </div>
+
+            {/* Nível 2: Compatibilidade */}
+            <div className="col-level">
+                <div className="card-group grouped">
+                    <ProCard title="Compatíveis" value={data.compatible} total={data.mif} status="good" hasNext={true} />
+                </div>
+                <div className="card-group grouped">
+                    <ProCard title="Incompatíveis" value={data.not_compatible} total={data.mif} status="bad" />
+                </div>
+            </div>
+
+            {/* Nível 3: Monitoramento */}
+            <div className="col-level">
+                <div className="card-group grouped" style={{flexGrow: 1.5}}>
+                    <ProCard title="Monitorados" value={data.registered} total={data.compatible} status="good" hasNext={true} />
+                </div>
+                <div className="card-group grouped" style={{flexGrow: 1}}>
+                    <ProCard title="Sem Monitoramento" value={data.not_registered} total={data.compatible} status="warn" hasNext={true} />
+                </div>
+                <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div>
+            </div>
+
+            {/* Nível 4: Detalhes Finais */}
+            <div className="col-level">
+                {/* Detalhes de Monitorados */}
+                <div className="card-group grouped" style={{flexGrow: 1.5}}>
+                    <ProCard title="NDD Print" value={data.ndd} total={data.registered} status="neutral" />
+                    <ProCard title="iW Remote" value={data.iw} total={data.registered} status="neutral" />
+                </div>
+
+                {/* Detalhes de Sem Monitoramento (Oportunidades) */}
+                <div className="card-group grouped" style={{flexGrow: 1}}>
+                    <div style={{display:'flex', flexDirection:'column', gap: 5, padding:'8px', background:'rgba(0,0,0,0.2)', borderRadius:4, border:'1px solid #546E7A', marginBottom: 5}}>
+                        <div style={{fontSize:9, color:'#B0BEC5', fontWeight:'bold', marginBottom:2, textAlign:'center'}}>OPORTUNIDADES (POSSÍVEL)</div>
+                        <div style={{display:'flex', gap:5}}>
+                            <div style={{flex:1}}><ProCard title="Canon" value={data.possible_canon} status="good" /></div>
+                            <div style={{flex:1}}><ProCard title="Inter" value={data.possible_inter} status="warn" /></div>
+                        </div>
+                    </div>
+                    <ProCard title="Não Possível" value={data.not_possible} total={data.not_registered} status="bad" />
+                </div>
+                <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div>
+            </div>
+
+            <div style={{position:'absolute', bottom: 10, right: 20, fontSize: 10, color: '#546E7A'}}>
+                Ref: {formatDate(data.last_date)}
+            </div>
+        </div>
+    );
+};
 const RenderPBLabel = ({ x, y, width, height, value, payload }: any) => { if (!payload || !value) return null; const showTotalHere = (payload.cor || 0) === 0; const totalReal = payload.total_prod; return ( <g style={{ pointerEvents: 'none' }}> {height > 12 && <text x={x + width / 2} y={y + height / 2} fill="white" textAnchor="middle" dominantBaseline="middle" fontSize={10} fontWeight="bold">{fmtMilhar(value)}</text>} {showTotalHere && <text x={x + width / 2} y={y - 8} fill="white" textAnchor="middle" fontSize={11} fontWeight="bold">{totalReal?.toLocaleString('pt-BR')}</text>} </g> ); };
 const RenderCorLabel = ({ x, y, width, height, value, payload }: any) => { if (!payload || !value) return null; const totalReal = payload.total_prod; return ( <g style={{ pointerEvents: 'none' }}> {height > 12 && <text x={x + width / 2} y={y + height / 2} fill="black" textAnchor="middle" dominantBaseline="middle" fontSize={10} fontWeight="bold">{fmtMilhar(value)}</text>} <text x={x + width / 2} y={y - 8} fill="white" textAnchor="middle" fontSize={11} fontWeight="bold">{totalReal?.toLocaleString('pt-BR')}</text> </g> ); };
 const RenderProjectionLabel = ({ x, y, width, value }: any) => { if (!value) return null; return <text x={x + width / 2} y={y - 8} fill="#FFD740" textAnchor="middle" fontSize={11} fontWeight="bold" fontStyle="italic">{value.toLocaleString('pt-BR')}</text>; };
@@ -130,7 +204,19 @@ function App() {
   const didInit = useRef(false);
 
   const showToast = (message: string, type: 'info' | 'success') => { setToast({ message, type, visible: true }); setTimeout(() => setToast(prev => ({ ...prev, visible: false })), 4000); };
-  const availableYears = useMemo(() => { if (!data) return [new Date().getFullYear()]; const years = new Set<number>(); data.production.forEach(d => years.add(d.ano)); data.communication.forEach(d => years.add(d.ano)); return Array.from(years).sort((a, b) => b - a); }, [data]);
+    const availableYears = useMemo(() => { 
+        if (!data) return [new Date().getFullYear()]; 
+        const years = new Set<number>(); 
+        
+        // Adiciona apenas anos válidos (>= 2020)
+        data.production.forEach(d => { if (d.ano >= 2020) years.add(d.ano); }); 
+        data.communication.forEach(d => { if (d.ano >= 2020) years.add(d.ano); }); 
+        
+        // Se a lista estiver vazia (ex: banco novo), garante pelo menos o ano atual
+        if (years.size === 0) years.add(new Date().getFullYear());
+
+        return Array.from(years).sort((a, b) => b - a); 
+    }, [data]);
 
   useEffect(() => {
     if (didInit.current) return;
@@ -142,9 +228,17 @@ function App() {
             unlistenMonitor = await listen("monitoring-status", (event: any) => { setStatusText(event.payload as string); });
             unlistenLoading = await listen("loading-status", (event: any) => { setStatusText(event.payload as string); });
             unlistenCompanies = await listen("companies-ready", () => {
+                console.log(">>> Evento companies-ready recebido!"); // Debug
                 setAreCompaniesReady(true);
-                invoke<string[]>("fetch_companies", { year: new Date().getFullYear() }).then(setCompanyList);
-                setStatusText("Lista de empresas atualizada.");
+                // Busca a lista imediatamente
+                invoke<string[]>("fetch_companies", { year: new Date().getFullYear() })
+                    .then((list) => {
+                        setCompanyList(list);
+                        setStatusText("Lista de empresas atualizada.");
+                        // Força o fim de qualquer loading residual se necessário
+                        setBgLoading(false); 
+                    })
+                    .catch(err => console.error("Erro ao buscar empresas:", err));
             });
 
             const initialData = await invoke<DashboardData>("perform_initial_load");
@@ -161,7 +255,11 @@ function App() {
                 setStatusText("Histórico completo."); setBgLoading(false);
             }).catch(console.error);
             invoke<MonitoringData>("fetch_monitoring_data").then(setMonitoringData);
-        } catch (err) { console.error("ERRO CRÍTICO:", err); setSplashError(String(err)); }
+        } catch (err) { 
+            console.error("ERRO CRÍTICO:", err); 
+            // ALTERAÇÃO AQUI: Mensagem fixa em vez de 'String(err)'
+            setSplashError("Não conectado. Você precisa estar na VPN para se conectar ao banco de dados."); 
+        }
     };
     startSystem();
     return () => { if(unlisten) unlisten(); if(unlistenMonitor) unlistenMonitor(); if(unlistenLoading) unlistenLoading(); if(unlistenCompanies) unlistenCompanies(); };
@@ -179,9 +277,24 @@ function App() {
       setConnectionError(true); // Abre o modal
   };
 
-  const handleFetchData = async (empresa: string) => {
-      if (!empresa) { if (consolidatedData) { setData(consolidatedData); setStatusText("Visão Consolidada restaurada."); } return; }
-      if (companyCache[empresa]) { setData(companyCache[empresa]); setStatusText(`Filtro: ${empresa} (Cache)`); return; }
+const handleFetchData = async (empresa: string) => {
+      // Se limpar o filtro, restaura o consolidado
+      if (!empresa) { 
+          if (consolidatedData) { 
+              setData(consolidatedData); 
+              setStatusText("Visão Consolidada restaurada."); 
+          } 
+          return; 
+      }
+
+      // Se já tiver o Dashboard no cache, usa ele
+      if (companyCache[empresa]) { 
+          setData(companyCache[empresa]); 
+          setStatusText(`Filtro: ${empresa} (Cache)`); 
+          // Mesmo com cache do dashboard, podemos tentar pre-carregar o painel se não tiver
+          prefetchPanelData(companyCache[empresa], empresa);
+          return; 
+      }
       
       setIsLoadingData(true); 
       setLoadingMsg("Preparando filtro..."); 
@@ -190,22 +303,85 @@ function App() {
       const unlisten = await listen("splash-status", (event: any) => setLoadingMsg(event.payload as string));
       
       invoke<DashboardData>("fetch_dashboard_data", { company: empresa, year: year })
-          .then(res => { setData(res); setCompanyCache(prev => ({ ...prev, [empresa]: res })); setStatusText(`Filtro: ${empresa}`); setIsLoadingData(false); })
-          .catch(err => handleApiError(err, () => handleFetchData(empresa))) // TRATAMENTO DE ERRO AQUI
+          .then(res => { 
+              setData(res); 
+              setCompanyCache(prev => ({ ...prev, [empresa]: res })); 
+              setIsLoadingData(false); // Libera a UI primeiro
+              
+              // INÍCIO DA NOVA LÓGICA DE PREFETCH
+              prefetchPanelData(res, empresa);
+          })
+          .catch(err => handleApiError(err, () => handleFetchData(empresa)))
           .finally(() => { unlisten(); });
+  };
+
+  // --- NOVA FUNÇÃO DE PREFETCH (Adicione logo abaixo de handleFetchData) ---
+  const prefetchPanelData = (dashboardData: DashboardData, empresa: string) => {
+      // Só faz prefetch se tiver empresa selecionada e dados de produção
+      if (!empresa || !dashboardData.production.length) return;
+
+      // 1. Descobre o último mês com atividade
+      // Ordena decrescente por Ano e Mês
+      const sortedProd = [...dashboardData.production]
+          .filter(p => (p.pb + p.cor) > 0) // Pega apenas meses com produção
+          .sort((a, b) => {
+              if (a.ano !== b.ano) return b.ano - a.ano;
+              return b.mes - a.mes;
+          });
+
+      if (sortedProd.length > 0) {
+          const latest = sortedProd[0];
+          const targetYear = latest.ano;
+          const targetMonth = latest.mes;
+          const cacheKey = `${targetYear}-${empresa}-${targetMonth}`;
+
+          // Se já está no cache do painel, não precisa baixar de novo
+          if (panelCache[cacheKey]) {
+              setStatusText(`Detalhes de ${MESES[targetMonth]} já em cache.`);
+              return;
+          }
+
+          setStatusText(`Pré-carregando detalhes de ${MESES[targetMonth]}...`);
+
+          // 2. Busca silenciosa (Background)
+          invoke<any[]>("fetch_month_details_cmd", { 
+              year: targetYear, 
+              month: targetMonth, 
+              company: empresa 
+          })
+          .then(details => {
+              // 3. Salva no Cache
+              setPanelCache(prev => ({ ...prev, [cacheKey]: details }));
+              setStatusText(`Detalhes de ${MESES[targetMonth]} prontos para visualização.`);
+              
+              // (Opcional) Se o usuário foi muito rápido e já abriu o painel nesse mês, atualiza a tela
+              if (isPanelOpen && panelMonthIndex === targetMonth && year === targetYear) {
+                  setPanelData(details);
+                  setPanelLoading(false);
+              }
+          })
+          .catch(err => {
+              console.error("Erro no prefetch:", err);
+              setStatusText("Erro ao pré-carregar detalhes.");
+          });
+      }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { const val = e.target.value; setTempCompany(val); const match = companyList.find(c => c.toLowerCase() === val.toLowerCase()); if (match && match !== selectedCompany) { setSelectedCompany(match); handleFetchData(match); } else if (val === "") { setTempCompany(""); setSelectedCompany(""); handleFetchData(""); } };
   const clearCompanyFilter = () => { setTempCompany(""); setSelectedCompany(""); handleFetchData(""); };
 
-  const loadPanelData = (monthIndex: number) => {
+const loadPanelData = (monthIndex: number, yearOverride?: number) => {
       setPanelLoading(true);
       setPanelData([]);
       setActiveTab('producing');
       setCurrentPage(1);
 
+      // Usa o ano passado por parâmetro ou o estado atual se não informado
+      const targetYear = yearOverride !== undefined ? yearOverride : year;
+
       const isGeneralView = !selectedCompany; 
-      const cacheKey = `${year}-${selectedCompany || 'GERAL'}-${monthIndex}`;
+      // Cache Key agora usa o targetYear correto
+      const cacheKey = `${targetYear}-${selectedCompany || 'GERAL'}-${monthIndex}`;
 
       if (panelCache[cacheKey]) {
           setPanelData(panelCache[cacheKey]);
@@ -216,7 +392,8 @@ function App() {
       }
 
       const command = isGeneralView ? "fetch_month_summary_cmd" : "fetch_month_details_cmd";
-      const args: any = { year: year, month: monthIndex };
+      // Usa targetYear na chamada do backend
+      const args: any = { year: targetYear, month: monthIndex };
       if (!isGeneralView) args.company = selectedCompany;
 
       invoke<any[]>(command, args)
@@ -227,7 +404,7 @@ function App() {
               setSortConfig(isGeneralView ? { key: 'offline', direction: 'desc' } : { key: 'total', direction: 'desc' });
               setPanelLoading(false);
           })
-          .catch(err => handleApiError(err, () => loadPanelData(monthIndex))); // TRATAMENTO DE ERRO AQUI
+          .catch(err => handleApiError(err, () => loadPanelData(monthIndex, targetYear))); 
   };
 
   const handleBarClick = (data: any) => {
@@ -240,12 +417,30 @@ function App() {
       loadPanelData(monthIndex);
   };
 
-  const changePanelMonth = (delta: number) => {
+const changePanelMonth = (delta: number) => {
       let newIndex = panelMonthIndex + delta;
-      if (newIndex < 1) newIndex = 12; 
-      if (newIndex > 12) newIndex = 1;
+      let newYear = year;
+
+      // Lógica de virada de ano
+      if (newIndex < 1) {
+          newIndex = 12;      // Volta para Dezembro
+          newYear = year - 1; // Do ano anterior
+      } 
+      else if (newIndex > 12) {
+          newIndex = 1;       // Avança para Janeiro
+          newYear = year + 1; // Do próximo ano
+      }
+
       setPanelMonthIndex(newIndex);
-      loadPanelData(newIndex);
+      
+      // Se o ano mudou, atualiza o estado global do ano também
+      if (newYear !== year) {
+          setYear(newYear);
+      }
+
+      // Chama o carregamento passando o ano explicitamente
+      // (pois o setYear é assíncrono e não teria atualizado ainda)
+      loadPanelData(newIndex, newYear);
   };
 
   const handleSort = (key: SortKey) => {
@@ -322,7 +517,41 @@ function App() {
 
   return (
     <>
-      {isInitialLoad && ( <div className="splash-container"> <div className="splash-top-bar" /> <div className="splash-icon-box">{splashError ? <div className="splash-error-mark">!</div> : <div className="splash-spinner"></div>}</div> <h1 className="splash-title">MONITORAMENTO RPA</h1> <p className="splash-status">{splashStatus}</p> {!splashError && (<div className="splash-progress-bg"><div className={`splash-progress-fill`} style={{ width: `${splashProgress}%` }}></div></div>)} {splashError && ( <div className="splash-error-container"> <p className="splash-error-title">ERRO</p> <p className="splash-error-desc" style={{marginBottom: '15px'}}>{splashError}</p> <div className="splash-actions"> <button className="btn-retry" onClick={() => window.location.reload()}>Tentar Novamente</button> <button className="btn-exit" onClick={() => invoke("quit_app")}>Fechar</button> </div> </div> )} <div className="splash-version">v1.0.0</div> </div> )}
+{isInitialLoad && (
+        // ADICIONADO: Classe dinâmica 'is-error' para controlar a animação via CSS
+        <div className={`splash-container ${splashError ? 'is-error' : ''}`}>
+          <div className="splash-top-bar" />
+          
+          <div className="splash-icon-box">
+            {splashError ? <div className="splash-error-mark">!</div> : <div className="splash-spinner"></div>}
+          </div>
+          
+          <h1 className="splash-title">MONITORAMENTO RPA</h1>
+          
+          {/* ALTERAÇÃO: O status e a barra de progresso somem quando dá erro, economizando espaço */}
+          {!splashError && (
+            <>
+              <p className="splash-status">{splashStatus}</p>
+              <div className="splash-progress-bg">
+                <div className={`splash-progress-fill`} style={{ width: `${splashProgress}%` }}></div>
+              </div>
+            </>
+          )}
+
+          {splashError && (
+            <div className="splash-error-container">
+              <p className="splash-error-title">ERRO</p>
+              <p className="splash-error-desc">{splashError}</p>
+              <div className="splash-actions">
+                <button className="btn-retry" onClick={() => window.location.reload()}>Tentar Novamente</button>
+                <button className="btn-exit" onClick={() => invoke("quit_app")}>Fechar</button>
+              </div>
+            </div>
+          )}
+          
+          <div className="splash-version">v1.0.0</div>
+        </div>
+      )}
       {isLoadingData && !isInitialLoad && ( <div className="loading-modal-overlay"> <div className="loading-box"> <div className="loading-spinner"></div> <div className="loading-text">{loadingMsg}</div> </div> </div> )}
       {toast.visible && ( <div className={`toast-container ${toast.type}`}> <span className="toast-icon">{toast.type === 'success' ? '✓' : 'ℹ'}</span> <span>{toast.message}</span> </div> )}
 
@@ -516,7 +745,7 @@ function App() {
                   <span className="footer-stat">Equipamentos: <b>{footerStats.equipments.toLocaleString()}</b></span>
                   <span className="separator">|</span>
               </>}
-              {bgLoading && <span className="footer-spinner"></span>}
+              {(bgLoading || !areCompaniesReady) && <span className="footer-spinner"></span>}
               <span className="status-text">{statusText}</span>
           </div>
         </footer>

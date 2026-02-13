@@ -34,51 +34,48 @@ fn calculate_smart_projection(
     records: &Vec<ProductionRecord>,
     db_last_date_str: &str,
 ) -> (i64, i64) {
-    let db_date = NaiveDate::parse_from_str(db_last_date_str, "%Y-%m-%d")
-        .unwrap_or_else(|_| Local::now().date_naive());
+    let now = Local::now();
     
-    let db_year = db_date.year();
-    let db_month = db_date.month() as i32;
-    let db_day = db_date.day() as i64;
+    // Tenta fazer o parse da data do banco. Se falhar, assume "hoje".
+    let db_date = NaiveDate::parse_from_str(db_last_date_str, "%Y-%m-%d")
+        .unwrap_or_else(|_| now.date_naive());
+    
+    // IMPORTANTE: A projeção deve ser baseada no ANO/MÊS da data de atualização do banco,
+    // não necessariamente no relógio do computador (caso o banco esteja atrasado).
+    let proj_year = db_date.year();
+    let proj_month = db_date.month() as i32;
+    let proj_day = db_date.day() as i64;
 
+    // Encontra o registro de produção correspondente à data do banco
     let current_rec = records.iter().find(|r| 
-        r.source == source_name && r.ano == db_year && r.mes == db_month
+        r.source == source_name && r.ano == proj_year && r.mes == proj_month
     );
 
     let (curr_pb, curr_cor) = match current_rec {
         Some(r) => (r.pb, r.cor),
-        None => return (0, 0),
+        None => return (0, 0), // Se não tem produção neste mês, não tem projeção
     };
 
-    let days_in_curr_month = days_in_month(db_year, db_month as u32);
-    let day_divisor = if db_day == 0 { 1 } else { db_day };
+    let days_in_curr_month = days_in_month(proj_year, proj_month as u32);
     
-    let rate_pb_linear = curr_pb as f64 / day_divisor as f64;
-    let rate_cor_linear = curr_cor as f64 / day_divisor as f64;
+    // Evita divisão por zero
+    let day_divisor = if proj_day == 0 { 1 } else { proj_day };
+    
+    // Projeção Linear Simples (Regra de 3)
+    // Se produziu X em 10 dias, vai produzir Y em 30.
+    let rate_pb = curr_pb as f64 / day_divisor as f64;
+    let rate_cor = curr_cor as f64 / day_divisor as f64;
 
-    let history: Vec<&ProductionRecord> = records.iter().filter(|r| 
-        r.source == source_name && r.mes == db_month && r.ano < db_year
-    ).collect();
+    let proj_pb = (rate_pb * days_in_curr_month as f64) as i64;
+    let proj_cor = (rate_cor * days_in_curr_month as f64) as i64;
 
-    let mut avg_daily_hist_pb = 0.0;
-    let mut avg_daily_hist_cor = 0.0;
-
-    if !history.is_empty() {
-        let total_pb_hist: i64 = history.iter().map(|r| r.pb).sum();
-        let total_cor_hist: i64 = history.iter().map(|r| r.cor).sum();
-        let total_days_hist = (history.len() * 30) as f64; 
-        if total_days_hist > 0.0 {
-            avg_daily_hist_pb = total_pb_hist as f64 / total_days_hist;
-            avg_daily_hist_cor = total_cor_hist as f64 / total_days_hist;
-        }
+    // Só retorna projeção se ela for maior que o realizado (para fazer sentido visualmente)
+    // e se não for o último dia do mês
+    if proj_day < days_in_curr_month {
+        return (proj_pb, proj_cor);
     }
 
-    let use_historical = db_day <= 5 || (avg_daily_hist_pb > 0.0 && rate_pb_linear < (avg_daily_hist_pb * 0.6));
-    
-    let final_rate_pb = if use_historical && avg_daily_hist_pb > 0.0 { avg_daily_hist_pb } else { rate_pb_linear };
-    let final_rate_cor = if use_historical && avg_daily_hist_cor > 0.0 { avg_daily_hist_cor } else { rate_cor_linear };
-
-    ((final_rate_pb * days_in_curr_month as f64) as i64, (final_rate_cor * days_in_curr_month as f64) as i64)
+    (curr_pb, curr_cor)
 }
 
 fn clean_name_for_display(raw: &str) -> String {
@@ -259,16 +256,23 @@ async fn perform_initial_load(app: AppHandle, window: Window, state: tauri::Stat
     let mut cache_guard = state.cache.lock().await;
     *cache_guard = Some(data.clone());
 
+    // Dispara o carregamento do mapa de empresas em background
     let app_clone = app.clone(); 
     tokio::spawn(async move {
-        let _ = app_clone.emit_all("loading-status", "Otimizando lista de empresas...");
+        // Pequeno delay para garantir que a UI carregou e está ouvindo
+        sleep(Duration::from_millis(1000)).await;
+        
         let state = app_clone.state::<AppState>();
+        // Força o cache do ano atual
         let _ = get_or_create_company_map(state, current_year).await;
+        
+        // Emite o evento avisando que acabou
         let _ = app_clone.emit_all("companies-ready", ());
     });
 
     let _ = window.emit("splash-status", "Pronto!");
-    sleep(Duration::from_millis(500)).await;
+    
+    // Retorna os dados para fechar o splash screen
     Ok(data)
 }
 
