@@ -1,0 +1,11 @@
+{
+  "version": "v1.1.1",
+  "notes": "Versão Base 1.1.1 com gráficos otimizados e prefetch em background.",
+  "pub_date": "2026-02-20T12:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1RlN1lwRDMybUd6QUk4M1F0VG82bkMraEZNbU1wK0lTbGFibjhabEdDZzdjOGg5S211WVdhKzlQeTFOaHgxazQ4OG5Hbnd3b2xNd21OYVhZT1dkR1FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcxNjEwMDQ3CWZpbGU6bmRkLXNxbF8xLjEuMV94NjQtc2V0dXAubnNpcy56aXAKcXN6Zkl6MmUySFZEWUFkb2Q0d2ZDT3pvck5jbTd6OG1KV3ZOK1ZYZXdTbzc0TWxpUG1LRUJJYUJSZ3ZKSFRpZnZ6NWRRRFIvM2RubmQwVmhMZGtkQkE9PQo=",
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.1/ndd-sql_1.1.1_x64-setup.nsis.zip"
+    }
+  }
+}
