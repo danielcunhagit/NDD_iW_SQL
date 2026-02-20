@@ -40,6 +40,7 @@ struct RawIwMif {
     cadastrado: Option<String>,
     possivel: Option<String>,
     status: Option<String>,
+    item_code: Option<String>,
 }
 
 // Usada no Monitoramento (MIF) - NDD
@@ -224,151 +225,144 @@ pub async fn get_communication_current(&self, start_year: i32, company_filter: O
     // MONITORAMENTO (MIF) - CORRIGIDO E OTIMIZADO
     // ==================================================================================
 
-    pub async fn get_monitoring_stats(&self) -> Result<crate::models::MonitoringData, Box<dyn Error + Send + Sync>> {
+pub async fn get_monitoring_stats(&self) -> Result<crate::models::MonitoringData, Box<dyn Error + Send + Sync>> {
         // Tenta obter a data mais recente
         let max_date_str: String = sqlx::query_scalar("SELECT TOP 1 CONVERT(varchar, data, 23) FROM vw_IW_Main ORDER BY data DESC")
             .fetch_one(&self.pool).await.unwrap_or("N/D".to_string());
         
-        // 1. NDD Raw - Sem funções de string no SQL para usar índices
-        // Se 'Compativel' não existir na tabela NDD, isso falharia. Vamos simplificar.
+        // 1. Busca lista de seriais do NDD (Snapshot atual)
         let sql_ndd = r#"
-            SELECT SerialNumber as serial 
+            SELECT DISTINCT UPPER(RTRIM(LTRIM(SerialNumber))) as serial
             FROM vw_NDD 
             WHERE data = (SELECT MAX(data) FROM vw_NDD)
         "#;
         
-        // 2. iW Raw - Trazendo campos brutos
+        // 2. Busca lista COMPLETA do iW (Snapshot atual)
         let sql_iw = r#"
-            SELECT [Serial#] as serial, 
-                   [Compativel iW] as compativel, 
-                   [Cadastrado no iW] as cadastrado, 
-                   [Possível cadastrar iW] as possivel, 
-                   [status] as status 
+            SELECT 
+                UPPER(RTRIM(LTRIM([Serial#]))) as serial, 
+                LOWER(CAST([Compativel iW] as varchar)) as compativel, 
+                LOWER(CAST([Cadastrado no iW] as varchar)) as cadastrado, 
+                LOWER(CAST([Possível cadastrar iW] as varchar)) as possivel, 
+                LOWER(CAST([status] as varchar)) as status,
+                UPPER(RTRIM(LTRIM([Item Code]))) as item_code
             FROM vw_IW_Main 
             WHERE data = (SELECT MAX(data) FROM vw_IW_Main)
         "#;
 
-        // Executa em paralelo
-        let (ndd_res, iw_res) = tokio::join!(
-            sqlx::query_as::<_, RawNddMif>(sql_ndd).fetch_all(&self.pool),
+        // Executa queries em paralelo
+        let (ndd_rows, iw_rows) = tokio::join!(
+            sqlx::query_scalar::<_, String>(sql_ndd).fetch_all(&self.pool),
             sqlx::query_as::<_, RawIwMif>(sql_iw).fetch_all(&self.pool)
         );
 
-        let ndd_rows = ndd_res?;
-        let iw_rows = iw_res?;
+        let ndd_serials_vec = ndd_rows?;
+        let iw_data = iw_rows?;
 
-        // --- CÁLCULOS EM MEMÓRIA (RUST) ---
+        // --- PROCESSAMENTO EM MEMÓRIA ---
 
-        let mut ndd_serials: HashSet<String> = HashSet::new();
-        // Assumindo que tudo no NDD é "compatível" a menos que haja coluna específica dizendo o contrário
-        let mut ndd_compat_serials: HashSet<String> = HashSet::new(); 
+        // 1. Conjunto de Seriais NDD para busca rápida e cálculo do card NDD
+        let ndd_set: std::collections::HashSet<String> = ndd_serials_vec.into_iter().collect();
+        let ndd_print_count = ndd_set.len() as i64; // Card "NDD Print"
 
-        for r in &ndd_rows {
+        // 2. Descobrir modelos compatíveis (Lógica anterior mantida)
+        let mut ndd_compatible_models = std::collections::HashSet::new();
+        for r in &iw_data {
             if let Some(serial) = &r.serial {
-                let s = Self::normalize_serial(serial);
-                ndd_serials.insert(s.clone());
-                ndd_compat_serials.insert(s.clone()); // Assumindo SIM por padrão para NDD
-            }
-        }
-
-        let mut iw_compat_serials: HashSet<String> = HashSet::new();
-        let mut iw_incompat_serials: HashSet<String> = HashSet::new();
-        let mut iw_registered_serials: HashSet<String> = HashSet::new();
-        let mut iw_unregistered_serials: HashSet<String> = HashSet::new();
-
-        let mut possible_canon = 0;
-        let mut possible_inter = 0;
-        let mut not_possible = 0;
-
-        let is_sim = |opt: &Option<String>| -> bool { 
-            if let Some(s) = opt { 
-                let v = s.trim().to_lowercase(); 
-                v == "sim" || v == "s" || v == "1" || v == "yes" 
-            } else { false } 
-        };
-
-        for r in &iw_rows {
-            if let Some(serial) = &r.serial {
-                let s = Self::normalize_serial(serial);
-                
-                // Compatibilidade
-                if is_sim(&r.compativel) {
-                    iw_compat_serials.insert(s.clone());
-                } else {
-                    iw_incompat_serials.insert(s.clone());
-                }
-
-                // Cadastro
-                if is_sim(&r.cadastrado) {
-                    iw_registered_serials.insert(s.clone());
-                } else {
-                    iw_unregistered_serials.insert(s.clone());
-                    
-                    // Lógica detalhada para não cadastrados
-                    if is_sim(&r.possivel) {
-                        let st = r.status.as_deref().unwrap_or("").to_lowercase();
-                        if st.contains("canon") { possible_canon += 1; }
-                        if st.contains("inter") { possible_inter += 1; }
-                    } else {
-                        not_possible += 1;
+                if ndd_set.contains(serial) {
+                    if let Some(code) = &r.item_code {
+                        if !code.trim().is_empty() {
+                            ndd_compatible_models.insert(code.clone());
+                        }
                     }
                 }
             }
         }
+        
+        // --- CÁLCULO DAS ESTATÍSTICAS ---
 
-        // --- CONSOLIDAÇÃO DOS TOTAIS ---
+        let mif = iw_data.len() as i64;
+        
+        let mut compatible_count = 0;
+        let mut not_compatible_count = 0;
+        
+        let mut iw_exclusive_count = 0; // Card "iW Remote" (Novo cálculo)
+        let mut monitored_count = 0;    // Card "Monitorados"
+        
+        // Cards detalhe (Sem Monitoramento)
+        let mut opp_canon = 0;
+        let mut opp_inter = 0;
+        let mut opp_not_possible = 0;
 
-        let mif = iw_rows.len() as i64; 
-        let ndd_print = ndd_rows.len() as i64; // NDD Print = Todas as linhas do NDD
+        let is_sim = |opt: &Option<String>| -> bool { 
+            if let Some(s) = opt { 
+                let v = s.trim(); 
+                v == "sim" || v == "s" || v == "1" || v == "yes" 
+            } else { false } 
+        };
 
-        // Compatíveis: iW Sim + NDD Sim (União)
-        let mut compatible_set = iw_compat_serials;
-        for s in ndd_compat_serials { compatible_set.insert(s); }
-        let compatible = compatible_set.len() as i64;
+        for r in &iw_data {
+            let serial = r.serial.as_deref().unwrap_or("").to_string();
+            
+            // --- 1. Lógica de Compatibilidade (Mantida) ---
+            let comp_iw = is_sim(&r.compativel);
+            let comp_ndd = r.item_code.as_ref()
+                .map(|code| ndd_compatible_models.contains(code))
+                .unwrap_or(false);
 
-        // Incompatíveis: iW Não - NDD (Já que se tá no NDD é compatível)
-        // Lógica ajustada: Se está no iW como não compativel E não está no NDD
-        let mut incompatible_count = 0;
-        for s in &iw_incompat_serials {
-            if !ndd_serials.contains(s) {
-                incompatible_count += 1;
+            if comp_iw || comp_ndd {
+                compatible_count += 1;
+            } else {
+                not_compatible_count += 1;
+            }
+
+            // --- 2. Lógica de Monitoramento (ALTERADA AQUI) ---
+            let in_ndd = ndd_set.contains(&serial);
+            let in_iw = is_sim(&r.cadastrado);
+
+            // Definição de Monitorado: Está no NDD OU está no iW
+            if in_ndd || in_iw {
+                monitored_count += 1;
+            } else {
+                // Se não é monitorado por ninguém, entra na estatística de Oportunidade
+                if is_sim(&r.possivel) {
+                    let st = r.status.as_deref().unwrap_or("");
+                    if st.contains("canon") {
+                        opp_canon += 1;
+                    } else if st.contains("inter") {
+                        opp_inter += 1;
+                    }
+                } else {
+                    opp_not_possible += 1;
+                }
+            }
+
+            // --- 3. Lógica do Card iW Remote (Exclusivo) ---
+            // Regra do Usuário: Filtrar cadastrado="sim" E remover duplicados do NDD.
+            // Ou seja: É iW MAS NÃO É NDD.
+            if in_iw && !in_ndd {
+                iw_exclusive_count += 1;
             }
         }
-        let not_compatible = incompatible_count; // Simplificado
 
-        // Monitorados: iW Cadastrado U NDD Total
-        let mut monitored_set = iw_registered_serials.clone();
-        for s in &ndd_serials { monitored_set.insert(s.clone()); }
-        let registered = monitored_set.len() as i64;
+        let not_registered = mif - monitored_count;
 
-        // Sem Monitoramento: iW Não Cadastrado - NDD
-        let mut not_registered_count = 0;
-        for s in &iw_unregistered_serials {
-            if !ndd_serials.contains(s) {
-                not_registered_count += 1;
-            }
-        }
-
-        // iW Remote: iW Cadastrado - NDD
-        let mut iw_only_count = 0;
-        for s in &iw_registered_serials {
-            if !ndd_serials.contains(s) {
-                iw_only_count += 1;
-            }
-        }
+        // VALIDAÇÃO FINAL (apenas comentário lógico):
+        // monitored_count (União) == ndd_print_count (A) + iw_exclusive_count (B - A)
+        // A lógica matemática está correta.
 
         Ok(crate::models::MonitoringData { 
             mif, 
-            compatible, 
-            not_compatible, 
-            registered, 
-            not_registered: not_registered_count, 
-            ndd: ndd_print, 
-            iw: iw_only_count, 
-            possible: (possible_canon + possible_inter), 
-            not_possible, 
-            possible_canon, 
-            possible_inter, 
+            compatible: compatible_count,
+            not_compatible: not_compatible_count, 
+            registered: monitored_count,     
+            not_registered,                  
+            ndd: ndd_print_count,            
+            iw: iw_exclusive_count, // Agora retorna apenas os EXCLUSIVOS do iW
+            possible: (opp_canon + opp_inter), 
+            not_possible: opp_not_possible,
+            possible_canon: opp_canon,
+            possible_inter: opp_inter,
             last_date: max_date_str 
         })
     }

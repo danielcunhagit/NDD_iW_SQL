@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import "./App.css";
 import { open } from '@tauri-apps/api/shell';
 
@@ -28,22 +28,22 @@ interface ToastMsg {
     visible: boolean;
 }
 
-interface DeviceDetail {
-    source: string;
-    serial: string;
-    empresa: string | null;
-    pb: number;
-    cor: number;
-    total: number;
-}
+// interface DeviceDetail {
+//     source: string;
+//     serial: string;
+//     empresa: string | null;
+//     pb: number;
+//     cor: number;
+//     total: number;
+// }
 
-interface CompanySummary {
-    source: string;
-    empresa: string;
-    online: number;
-    offline: number;
-    producao: number;
-}
+// interface CompanySummary {
+//     source: string;
+//     empresa: string;
+//     online: number;
+//     offline: number;
+//     producao: number;
+// }
 
 type SortKey = 'source' | 'serial' | 'empresa' | 'pb' | 'cor' | 'total' | 'online' | 'offline' | 'producao';
 interface SortConfig {
@@ -134,6 +134,28 @@ const MonitoringView = ({ data }: { data: MonitoringData | null }) => {
         </div>
     );
 };
+
+const RenderCompCurrLabel = (props: any) => { 
+    const { x, y, width, height, value, payload } = props;
+    if (!value) return null; 
+    
+    // Adicionado o `?.` para não dar erro na animação inicial do gráfico
+    const hasGap = payload?.total_gap > 0; 
+    const placeInside = hasGap && height > 15;
+    const textY = placeInside ? y + 12 : y - 5; 
+    const textFill = placeInside ? "#000" : "#fff"; 
+    return <text x={x + width / 2} y={textY} fill={textFill} textAnchor="middle" fontSize={10} fontWeight="bold">{fmtMilhar(value)}</text>; 
+};
+
+const RenderCompProjLabel = (props: any) => { 
+    const { x, y, width, payload } = props;
+    
+    // Trava de segurança total aqui também
+    if (!payload || !payload.total_gap || payload.total_gap <= 0) return null; 
+    
+    return <text x={x + width / 2} y={y - 8} fill="#FFD740" textAnchor="middle" fontSize={11} fontWeight="bold" fontStyle="italic">{fmtMilhar(payload.total_proj)}</text>; 
+};
+
 const RenderPBLabel = ({ x, y, width, height, value, payload }: any) => { if (!payload || !value) return null; const showTotalHere = (payload.cor || 0) === 0; const totalReal = payload.total_prod; return ( <g style={{ pointerEvents: 'none' }}> {height > 12 && <text x={x + width / 2} y={y + height / 2} fill="white" textAnchor="middle" dominantBaseline="middle" fontSize={10} fontWeight="bold">{fmtMilhar(value)}</text>} {showTotalHere && <text x={x + width / 2} y={y - 8} fill="white" textAnchor="middle" fontSize={11} fontWeight="bold">{totalReal?.toLocaleString('pt-BR')}</text>} </g> ); };
 const RenderCorLabel = ({ x, y, width, height, value, payload }: any) => { if (!payload || !value) return null; const totalReal = payload.total_prod; return ( <g style={{ pointerEvents: 'none' }}> {height > 12 && <text x={x + width / 2} y={y + height / 2} fill="black" textAnchor="middle" dominantBaseline="middle" fontSize={10} fontWeight="bold">{fmtMilhar(value)}</text>} <text x={x + width / 2} y={y - 8} fill="white" textAnchor="middle" fontSize={11} fontWeight="bold">{totalReal?.toLocaleString('pt-BR')}</text> </g> ); };
 const RenderProjectionLabel = ({ x, y, width, value }: any) => { if (!value) return null; return <text x={x + width / 2} y={y - 8} fill="#FFD740" textAnchor="middle" fontSize={11} fontWeight="bold" fontStyle="italic">{value.toLocaleString('pt-BR')}</text>; };
@@ -161,11 +183,80 @@ const RenderCommLabel = ({ x, y, width, height, payload, type }: any) => {
     ); 
 };
 const RenderCompLabel = ({ x, y, width, value, fill }: any) => { if (!value) return null; return <text x={x + width / 2} y={y - 5} fill={fill} textAnchor="middle" fontSize={10} fontWeight="bold">{fmtMilhar(value)}</text>; };
-const DefaultTooltip = ({ active, payload, label, view, sourceFilter }: any) => { if (active && payload && payload.length) { const d = payload[0].payload; if (view.startsWith('production') && (d.pb + d.cor) === 0) return null; if (view === 'communication' && d.total_devs === 0) return null; const activeDevices = d.devices || 0; const average = activeDevices > 0 ? Math.round(d.total_prod / activeDevices) : 0; let tags = null; if (d.has_ndd && d.has_iw) { tags = <><span className="source-tag src-ndd">NDD</span><span className="source-tag src-iw">iW</span></>; } else if (d.has_ndd) { tags = <span className="source-tag src-ndd">NDD</span>; } else if (d.has_iw) { tags = <span className="source-tag src-iw">iW</span>; } return ( <div style={{ background: '#263238', border: '1px solid #546E7A', padding: '12px', borderRadius: '6px', minWidth: 160, zIndex: 100 }}> <p style={{ fontWeight: 'bold', color: 'white', marginBottom: 8, fontSize: 13, textAlign: 'center' }}>{label}</p> {view.startsWith('production') ? ( <> <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', color: '#B0BEC5', fontSize: 11, marginBottom: 4, fontWeight: 'bold', borderBottom: '1px solid #37474F'}}> <span>PRODUÇÃO</span> <div>{tags}</div> </div> <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#546E7A'}}>P&B:</span><span style={{color:'#fff', fontWeight:'bold'}}>{d.pb.toLocaleString()}</span></div> <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#00E5FF'}}>Cor:</span><span style={{color:'#fff', fontWeight:'bold'}}>{d.cor.toLocaleString()}</span></div> <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, marginBottom: 4 }}> <span style={{color:'#fff'}}>Total:</span><span style={{color:'#fff', fontWeight:'bold'}}>{(d.pb+d.cor).toLocaleString()}</span> </div> <div style={{ borderTop:'1px solid #546E7A', margin: '4px 0' }}></div> <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#B0BEC5'}}>Impressoras produzindo:</span><span style={{color:'#fff', fontWeight:'bold'}}>{activeDevices.toLocaleString()}</span></div> <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#B0BEC5'}}>Média de produção por impressora:</span><span style={{color:'#FFD740', fontWeight:'bold'}}>{average.toLocaleString()}</span></div> {d.total_proj > (d.pb+d.cor) && <p style={{color: '#FFD740', textAlign:'right', marginTop:4, fontSize:11}}>Est: {d.total_proj.toLocaleString()}</p>} </> ) : ( <> <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#26A69A'}}>ON:</span><span style={{color:'#fff'}}>{d.connected.toLocaleString()} ({d.pct_conn}%)</span></div> <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#EF5350'}}>OFF:</span><span style={{color:'#fff'}}>{d.disconnected.toLocaleString()} ({d.pct_disc}%)</span></div> <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, borderTop:'1px solid #37474F' }}><span style={{color:'#B0BEC5'}}>Total:</span><span style={{color:'#fff', fontWeight:'bold'}}>{d.total_devs.toLocaleString()}</span></div> </> )} </div> ); } return null; };
+const DefaultTooltip = ({ active, payload, label, view, sourceFilter, selectedYear }: any) => { 
+    if (active && payload && payload.length) { 
+        const d = payload[0].payload; 
+        if (view.startsWith('production') && (d.pb + d.cor) === 0) return null; 
+        if (view === 'communication' && d.total_devs === 0) return null; 
+        
+        const activeDevices = d.devices || 0; 
+        const average = activeDevices > 0 ? Math.round(d.total_prod / activeDevices) : 0; 
+        let tags = null; 
+        
+        if (d.has_ndd && d.has_iw) { 
+            tags = <><span className="source-tag src-ndd">NDD</span><span className="source-tag src-iw">iW</span></>; 
+        } else if (d.has_ndd) { 
+            tags = <span className="source-tag src-ndd">NDD</span>; 
+        } else if (d.has_iw) { 
+            tags = <span className="source-tag src-iw">iW</span>; 
+        } 
+        
+        // --- LÓGICA DO MÊS PARCIAL ---
+        const currentMonthIdx = new Date().getMonth() + 1; 
+        const currentYear = new Date().getFullYear();
+        const labelMonthIdx = MESES.indexOf(label);
+        const isCurrentMonth = (labelMonthIdx === currentMonthIdx && selectedYear === currentYear);
+        // -----------------------------
+
+        return ( 
+            <div style={{ background: '#263238', border: '1px solid #546E7A', padding: '12px', borderRadius: '6px', minWidth: 160, zIndex: 100 }}> 
+                <p style={{ fontWeight: 'bold', color: 'white', marginBottom: 8, fontSize: 13, textAlign: 'center' }}>{label}</p> 
+                
+                {view.startsWith('production') ? ( 
+                    <> 
+                        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', color: '#B0BEC5', fontSize: 11, marginBottom: 4, fontWeight: 'bold', borderBottom: '1px solid #37474F'}}> 
+                            <span>PRODUÇÃO</span> <div>{tags}</div> 
+                        </div> 
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#546E7A'}}>P&B:</span><span style={{color:'#fff', fontWeight:'bold'}}>{d.pb.toLocaleString()}</span></div> 
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#00E5FF'}}>Cor:</span><span style={{color:'#fff', fontWeight:'bold'}}>{d.cor.toLocaleString()}</span></div> 
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, marginBottom: 4 }}> 
+                            <span style={{color:'#fff'}}>Total:</span><span style={{color:'#fff', fontWeight:'bold'}}>{(d.pb+d.cor).toLocaleString()}</span> 
+                        </div> 
+                        <div style={{ borderTop:'1px solid #546E7A', margin: '4px 0' }}></div> 
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#B0BEC5'}}>Impressoras produzindo:</span><span style={{color:'#fff', fontWeight:'bold'}}>{activeDevices.toLocaleString()}</span></div> 
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#B0BEC5'}}>Média / imp.:</span><span style={{color:'#FFD740', fontWeight:'bold'}}>{average.toLocaleString()}</span></div> 
+                        {d.total_proj > (d.pb+d.cor) && <p style={{color: '#FFD740', textAlign:'right', marginTop:4, fontSize:11}}>Est: {d.total_proj.toLocaleString()}</p>} 
+                    </> 
+                ) : ( 
+                    <> 
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#26A69A'}}>ON:</span><span style={{color:'#fff'}}>{d.connected.toLocaleString()} ({d.pct_conn}%)</span></div> 
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{color:'#EF5350'}}>OFF:</span><span style={{color:'#fff'}}>{d.disconnected.toLocaleString()} ({d.pct_disc}%)</span></div> 
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, borderTop:'1px solid #37474F', paddingTop: 6 }}><span style={{color:'#B0BEC5'}}>Total:</span><span style={{color:'#fff', fontWeight:'bold'}}>{d.total_devs.toLocaleString()}</span></div> 
+                        
+                        {/* --- INDICADOR PARCIAL NA CAIXINHA --- */}
+                        <div style={{ marginTop: 8, textAlign: 'center', background: d.pct_conn >= 90 ? 'rgba(38, 166, 154, 0.1)' : 'rgba(239, 83, 80, 0.1)', padding: '4px', borderRadius: '4px' }}>
+                            {d.pct_conn >= 90 ? (
+                                <span style={{ color: '#00E5FF', fontWeight: 'bold', fontSize: 11 }}>
+                                    {isCurrentMonth ? "★ NA META (PARCIAL)" : "★ META ATINGIDA"}
+                                </span>
+                            ) : (
+                                <span style={{ color: '#FFD740', fontWeight: 'bold', fontSize: 11 }}>
+                                    {isCurrentMonth ? "⚠ ABAIXO DA META (PARCIAL)" : "⚠ ABAIXO DA META"}
+                                </span>
+                            )}
+                        </div>
+                    </> 
+                )} 
+            </div> 
+        ); 
+    } 
+    return null; 
+};
+
 const ComparisonTooltip = ({ active, payload, label, selectedYear, lastUpdateDate }: any) => { if (active && payload && payload.length >= 2) { const prevData = payload.find((p: any) => p.dataKey === "prev_total"); const currData = payload.find((p: any) => p.dataKey === "curr_total"); if (!prevData || !currData) return null; const d = payload[0].payload; const prevVal = prevData.value; const currVal = currData.value; let dbDay = 0; let dbMonth = 0; let dbYear = 0; if (lastUpdateDate && lastUpdateDate !== "N/D") { const parts = lastUpdateDate.split('-'); if(parts.length === 3) { dbYear = parseInt(parts[0]); dbMonth = parseInt(parts[1]); dbDay = parseInt(parts[2]); } } const monthIndex = MESES.indexOf(label); const isCurrentMonthInDb = (selectedYear === dbYear) && (monthIndex === dbMonth); const isFutureMonth = (selectedYear === dbYear) && (monthIndex > dbMonth); let currentLabelText = `${currData.name}`; if (isCurrentMonthInDb && dbDay > 0) { currentLabelText = `Prod. até ${dbDay.toString().padStart(2, '0')}/${dbMonth.toString().padStart(2, '0')}`; } let diffDisplay = <></>; let estimateRow = <></>; if (prevVal > 0) { if (currVal === 0 && isFutureMonth) { diffDisplay = <span style={{color: '#90A4AE', fontStyle: 'italic', fontSize: 11}}>Aguardando dados...</span>; } else { let valToCompare = currVal; let isEstComparison = false; if (isCurrentMonthInDb && d.total_proj > currVal) { valToCompare = d.total_proj; isEstComparison = true; estimateRow = ( <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 11 }}> <span style={{color: '#FFD740', fontStyle: 'italic'}}>Produção estimada:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(d.total_proj)}</span> </div> ); } const diffPct = ((valToCompare - prevVal) / prevVal) * 100; let colorDiff = "#B0BEC5"; let diffText = "Estável"; if (diffPct > 0) { diffText = "Aumento"; colorDiff = "#00E676"; } else if (diffPct < 0) { diffText = "Diminuição"; colorDiff = "#EF5350"; } let diffSuffix = isEstComparison ? " (Est.)" : ""; diffDisplay = <span style={{color: colorDiff}}>{diffText}{diffSuffix} {Math.abs(diffPct).toFixed(2)}%</span>; } } else if (currVal > 0) { diffDisplay = <span style={{color: "#00E676"}}>Novo (100.00%)</span>; } return ( <div style={{ background: '#263238', border: '1px solid #546E7A', padding: '12px', borderRadius: '6px', minWidth: 180, zIndex: 100 }}> <p style={{ fontWeight: 'bold', color: 'white', marginBottom: 8, fontSize: 13, textAlign: 'center', borderBottom: '1px solid #455A64', paddingBottom: 4 }}>{label}</p> <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}> <span style={{color: '#90A4AE'}}>{prevData.name}:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(prevVal)}</span> </div> <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}> <span style={{color: '#00E5FF'}}>{currentLabelText}:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(currVal)}</span> </div> {estimateRow} <div style={{ borderTop: '1px solid #455A64', paddingTop: 6, textAlign: 'center', fontSize: 13, fontWeight: 'bold' }}>{diffDisplay}</div> </div> ); } return null; };
 
 function App() {
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [splashStatus, setSplashStatus] = useState("Iniciando...");
   const [splashProgress, setSplashProgress] = useState(10);
   const [splashError, setSplashError] = useState<string | null>(null);
@@ -176,11 +267,19 @@ function App() {
   const [consolidatedData, setConsolidatedData] = useState<DashboardData | null>(null);
   const [companyCache, setCompanyCache] = useState<Record<string, DashboardData>>({}); 
   const [monitoringData, setMonitoringData] = useState<MonitoringData | null>(null);
+  const [showGoalLine, setShowGoalLine] = useState(false);
   const [bgLoading, setBgLoading] = useState(false);
   const [areCompaniesReady, setAreCompaniesReady] = useState(false);
   const [toast, setToast] = useState<ToastMsg>({ message: '', type: 'info', visible: false });
   const [companyList, setCompanyList] = useState<string[]>([]);
-  const [currentView, setCurrentView] = useState<ViewType>('production_current');
+  const [currentView, setCurrentView] = useState<ViewType>('production_current');  
+        useEffect(() => {
+            if (currentView === 'communication') {
+                setShowGoalLine(false);
+                const timer = setTimeout(() => setShowGoalLine(true), 900); 
+                return () => clearTimeout(timer);
+            }
+        }, [currentView]);
   const [year, setYear] = useState(new Date().getFullYear());
   const [source, setSource] = useState("Consolidado");
   const [tempCompany, setTempCompany] = useState(""); 
@@ -196,6 +295,60 @@ function App() {
   const itemsPerPage = 15;
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'total', direction: 'desc' });
   const [panelCache, setPanelCache] = useState<Record<string, any[]>>({});
+  const fetchedKeys = useRef<Set<string>>(new Set());
+
+  // --- PRÉ-CARREGAMENTO EM BACKGROUND ---
+  useEffect(() => {
+      if (!data || !data.production) return;
+
+      // Descobre todos os meses que têm produção no ano atual, ordenando do mais recente para o mais antigo
+      const monthsToFetch = [...new Set(
+          data.production
+              .filter(p => p.ano === year && (p.pb + p.cor) > 0)
+              .map(p => p.mes)
+      )].sort((a, b) => b - a);
+
+      if (monthsToFetch.length === 0) return;
+
+      let isCancelled = false;
+
+      const prefetchAll = async () => {
+          const isGeneralView = !selectedCompany;
+          const command = isGeneralView ? "fetch_month_summary_cmd" : "fetch_month_details_cmd";
+
+          for (const month of monthsToFetch) {
+              if (isCancelled) break; // Se o usuário mudar de tela/filtro, cancela a fila atual
+
+              const cacheKey = `${year}-${selectedCompany || 'GERAL'}-${month}`;
+              
+              // Se já baixou ou está baixando, pula para o próximo mês
+              if (fetchedKeys.current.has(cacheKey) || panelCache[cacheKey]) continue;
+
+              fetchedKeys.current.add(cacheKey); // Marca que já fomos buscar
+
+              try {
+                  const args: any = { year, month };
+                  if (!isGeneralView) args.company = selectedCompany;
+
+                  const res = await invoke<any[]>(command, args);
+                  if (isCancelled) break;
+
+                  // Salva os dados silenciosamente no cache do painel
+                  setPanelCache(prev => ({ ...prev, [cacheKey]: res }));
+
+                  // Dá um respiro de 300ms entre cada requisição para não travar o banco de dados nem a interface
+                  await new Promise(r => setTimeout(r, 300));
+              } catch (err) {
+                  console.error(`Erro ao pré-carregar mês ${month}:`, err);
+                  fetchedKeys.current.delete(cacheKey); // Tira da lista para tentar depois
+              }
+          }
+      };
+
+      prefetchAll();
+
+      return () => { isCancelled = true; };
+  }, [data, year, selectedCompany]);
 
   // --- NOVOS ESTADOS PARA O MODAL DE RECONEXÃO ---
   const [connectionError, setConnectionError] = useState(false);
@@ -278,94 +431,40 @@ function App() {
   };
 
 const handleFetchData = async (empresa: string) => {
-      // Se limpar o filtro, restaura o consolidado
-      if (!empresa) { 
-          if (consolidatedData) { 
-              setData(consolidatedData); 
-              setStatusText("Visão Consolidada restaurada."); 
-          } 
-          return; 
-      }
+    // Se limpar o filtro, restaura o consolidado
+    if (!empresa) { 
+        if (consolidatedData) { 
+            setData(consolidatedData); 
+            setStatusText("Visão Consolidada restaurada."); 
+        } 
+        return; 
+    }
 
-      // Se já tiver o Dashboard no cache, usa ele
-      if (companyCache[empresa]) { 
-          setData(companyCache[empresa]); 
-          setStatusText(`Filtro: ${empresa} (Cache)`); 
-          // Mesmo com cache do dashboard, podemos tentar pre-carregar o painel se não tiver
-          prefetchPanelData(companyCache[empresa], empresa);
-          return; 
-      }
-      
-      setIsLoadingData(true); 
-      setLoadingMsg("Preparando filtro..."); 
-      setStatusText("Filtrando...");
-      
-      const unlisten = await listen("splash-status", (event: any) => setLoadingMsg(event.payload as string));
-      
-      invoke<DashboardData>("fetch_dashboard_data", { company: empresa, year: year })
-          .then(res => { 
-              setData(res); 
-              setCompanyCache(prev => ({ ...prev, [empresa]: res })); 
-              setIsLoadingData(false); // Libera a UI primeiro
-              
-              // INÍCIO DA NOVA LÓGICA DE PREFETCH
-              prefetchPanelData(res, empresa);
-          })
-          .catch(err => handleApiError(err, () => handleFetchData(empresa)))
-          .finally(() => { unlisten(); });
-  };
-
-  // --- NOVA FUNÇÃO DE PREFETCH (Adicione logo abaixo de handleFetchData) ---
-  const prefetchPanelData = (dashboardData: DashboardData, empresa: string) => {
-      // Só faz prefetch se tiver empresa selecionada e dados de produção
-      if (!empresa || !dashboardData.production.length) return;
-
-      // 1. Descobre o último mês com atividade
-      // Ordena decrescente por Ano e Mês
-      const sortedProd = [...dashboardData.production]
-          .filter(p => (p.pb + p.cor) > 0) // Pega apenas meses com produção
-          .sort((a, b) => {
-              if (a.ano !== b.ano) return b.ano - a.ano;
-              return b.mes - a.mes;
-          });
-
-      if (sortedProd.length > 0) {
-          const latest = sortedProd[0];
-          const targetYear = latest.ano;
-          const targetMonth = latest.mes;
-          const cacheKey = `${targetYear}-${empresa}-${targetMonth}`;
-
-          // Se já está no cache do painel, não precisa baixar de novo
-          if (panelCache[cacheKey]) {
-              setStatusText(`Detalhes de ${MESES[targetMonth]} já em cache.`);
-              return;
-          }
-
-          setStatusText(`Pré-carregando detalhes de ${MESES[targetMonth]}...`);
-
-          // 2. Busca silenciosa (Background)
-          invoke<any[]>("fetch_month_details_cmd", { 
-              year: targetYear, 
-              month: targetMonth, 
-              company: empresa 
-          })
-          .then(details => {
-              // 3. Salva no Cache
-              setPanelCache(prev => ({ ...prev, [cacheKey]: details }));
-              setStatusText(`Detalhes de ${MESES[targetMonth]} prontos para visualização.`);
-              
-              // (Opcional) Se o usuário foi muito rápido e já abriu o painel nesse mês, atualiza a tela
-              if (isPanelOpen && panelMonthIndex === targetMonth && year === targetYear) {
-                  setPanelData(details);
-                  setPanelLoading(false);
-              }
-          })
-          .catch(err => {
-              console.error("Erro no prefetch:", err);
-              setStatusText("Erro ao pré-carregar detalhes.");
-          });
-      }
-  };
+    // Se já tiver o Dashboard no cache, usa ele
+    if (companyCache[empresa]) { 
+        setData(companyCache[empresa]); 
+        setStatusText(`Filtro: ${empresa} (Cache)`); 
+        // A linha do prefetchPanelData que ficava aqui foi removida!
+        return; 
+    }
+    
+    setIsLoadingData(true); 
+    setLoadingMsg("Preparando filtro..."); 
+    setStatusText("Filtrando...");
+    
+    const unlisten = await listen("splash-status", (event: any) => setLoadingMsg(event.payload as string));
+    
+    invoke<DashboardData>("fetch_dashboard_data", { company: empresa, year: year })
+        .then(res => { 
+            setData(res); 
+            setCompanyCache(prev => ({ ...prev, [empresa]: res })); 
+            setIsLoadingData(false); // Libera a UI primeiro
+            
+            // A linha do prefetchPanelData que dava erro aqui também foi removida!
+        })
+        .catch(err => handleApiError(err, () => handleFetchData(empresa)))
+        .finally(() => { unlisten(); });
+};
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { const val = e.target.value; setTempCompany(val); const match = companyList.find(c => c.toLowerCase() === val.toLowerCase()); if (match && match !== selectedCompany) { setSelectedCompany(match); handleFetchData(match); } else if (val === "") { setTempCompany(""); setSelectedCompany(""); handleFetchData(""); } };
   const clearCompanyFilter = () => { setTempCompany(""); setSelectedCompany(""); handleFetchData(""); };
@@ -477,13 +576,13 @@ const changePanelMonth = (delta: number) => {
 
   const chartData = useMemo(() => {
     if (!data) return [];
-    const grouped = Array.from({ length: 13 }, (_, i) => ({ 
-        name: MESES[i], pb: 0, cor: 0, devices: 0, 
-        pb_gap: 0, cor_gap: 0, connected: 0, disconnected: 0, 
-        total_devs: 0, total_prod: 0, total_proj: 0, 
-        pct_conn: 0, pct_disc: 0, prev_total: 0, curr_total: 0,
-        has_ndd: false, has_iw: false 
-    }));
+        const grouped = Array.from({ length: 13 }, (_, i) => ({ 
+            name: MESES[i], pb: 0, cor: 0, devices: 0, 
+            pb_gap: 0, cor_gap: 0, total_gap: 0, connected: 0, disconnected: 0,
+            total_devs: 0, total_prod: 0, total_proj: 0, 
+            pct_conn: 0, pct_disc: 0, prev_total: 0, curr_total: 0,
+            has_ndd: false, has_iw: false 
+        }));
     
     const prevYear = year - 1;
     const filterFn = (d: { source: string }) => { if (source === "Consolidado") return true; if (source === "NDD") return d.source === "NDD"; if (source === "iW") return d.source === "IW"; return false; };
@@ -501,14 +600,33 @@ const changePanelMonth = (delta: number) => {
         } 
         if (currentView === 'production_compare' && d.ano === prevYear) grouped[d.mes].prev_total += (d.pb + d.cor); 
       });
+
       let targetMonth = new Date().getFullYear() === year ? new Date().getMonth() + 1 : -1;
       let targetYear = new Date().getFullYear();
-      if (data.last_update_ndd && data.last_update_ndd !== "N/D") { try { const parts = data.last_update_ndd.split('-'); if (parts.length === 3) { targetYear = parseInt(parts[0]); targetMonth = parseInt(parts[1]); } } catch (e) {} }
-      if (year === targetYear && data.projection) { const cm = targetMonth; let estPB = 0, estCor = 0; if (source === "Consolidado") { estPB = data.projection.ndd_pb + data.projection.iw_pb; estCor = data.projection.ndd_cor + data.projection.iw_cor; } else if (source === "NDD") { estPB = data.projection.ndd_pb; estCor = data.projection.ndd_cor; } else if (source === "iW") { estPB = data.projection.iw_pb; estCor = data.projection.iw_cor; } if (cm >= 1 && cm <= 12) { grouped[cm].pb_gap = Math.max(0, estPB - grouped[cm].pb); grouped[cm].cor_gap = Math.max(0, estCor - grouped[cm].cor); grouped[cm].total_proj = grouped[cm].total_prod + grouped[cm].pb_gap + grouped[cm].cor_gap; } }
+      if (data.last_update_ndd && data.last_update_ndd !== "N/D") { 
+          try { const parts = data.last_update_ndd.split('-'); if (parts.length === 3) { targetYear = parseInt(parts[0]); targetMonth = parseInt(parts[1]); } } catch (e) {} 
+      }
+      
+      if (year === targetYear && data.projection) { 
+        const cm = targetMonth; 
+        let estPB = 0, estCor = 0; 
+        if (source === "Consolidado") { estPB = data.projection.ndd_pb + data.projection.iw_pb; estCor = data.projection.ndd_cor + data.projection.iw_cor; } 
+        else if (source === "NDD") { estPB = data.projection.ndd_pb; estCor = data.projection.ndd_cor; } 
+        else if (source === "iW") { estPB = data.projection.iw_pb; estCor = data.projection.iw_cor; } 
+      
+        if (cm >= 1 && cm <= 12) { 
+            grouped[cm].pb_gap = Math.max(0, estPB - grouped[cm].pb); 
+            grouped[cm].cor_gap = Math.max(0, estCor - grouped[cm].cor); 
+            grouped[cm].total_gap = grouped[cm].pb_gap + grouped[cm].cor_gap; 
+            grouped[cm].total_proj = grouped[cm].total_prod + grouped[cm].pb_gap + grouped[cm].cor_gap; 
+        }
+      } // <--- ESSA FOI A CHAVE QUE FALTOU E QUEBROU O CÓDIGO!
+      
     } else {
       data.communication.filter(filterFn).forEach(d => { if (d.ano === year) { grouped[d.mes].connected += d.connected; grouped[d.mes].disconnected += d.disconnected; } });
       grouped.forEach(g => { g.total_devs = g.connected + g.disconnected; if (g.total_devs > 0) { g.pct_conn = Math.round((g.connected/g.total_devs)*100); g.pct_disc = Math.round((g.disconnected/g.total_devs)*100); } });
     }
+    
     return grouped.slice(1);
   }, [data, currentView, year, source]);
 
@@ -702,16 +820,46 @@ const changePanelMonth = (delta: number) => {
                             <YAxis stroke="#B0BEC5" tickFormatter={formatYAxis} tick={{fontSize: 11}} />
                             <Tooltip content={<ComparisonTooltip selectedYear={year} lastUpdateDate={data?.last_update_ndd} />} cursor={{ fill: 'transparent' }} />
                             <Legend verticalAlign="top" height={36} wrapperStyle={{fontSize: '12px', color: '#fff'}} />
-                            <Bar name={`Produção ${year - 1}`} dataKey="prev_total" fill="#546E7A" radius={[3, 3, 0, 0]} label={(props) => <RenderCompLabel {...props} fill="#B0BEC5" />} onClick={handleBarClick} style={{cursor:'pointer'}} />
-                            <Bar name={`Produção ${year}`} dataKey="curr_total" fill="#00E5FF" radius={[3, 3, 0, 0]} label={(props) => <RenderCompLabel {...props} fill="#fff" />} onClick={handleBarClick} style={{cursor:'pointer'}} />
+                            
+                                {/* Barra do ano anterior (agora com stackId="prev_year" para forçar a ordem na esquerda) */}
+                                <Bar name={`Produção ${year - 1}`} dataKey="prev_total" stackId="prev_year" fill="#546E7A" radius={[3, 3, 0, 0]} label={(props) => <RenderCompLabel {...props} fill="#B0BEC5" />} onClick={handleBarClick} style={{cursor:'pointer'}} />
+
+                                {/* Barra do ano atual (na direita) */}
+                                <Bar name={`Produção ${year}`} dataKey="curr_total" stackId="curr_year" fill="#00E5FF" radius={[3, 3, 0, 0]} label={(props) => <RenderCompCurrLabel {...props} />} onClick={handleBarClick} style={{cursor:'pointer'}} />
+
+                                {/* Projeção do ano atual em cima da barra do ano atual */}
+                                <Bar dataKey="total_gap" stackId="curr_year" fill="#00E5FF" opacity={0.6} stroke="#fff" strokeDasharray="3 3" radius={[3, 3, 0, 0]} label={(props) => <RenderCompProjLabel {...props} />} style={{pointerEvents: 'none'}} legendType="none" />
                         </BarChart>
                     ) : (
-                        <BarChart data={chartData} onClick={handleBarClick} style={{cursor:'pointer'}} stackOffset={currentView === 'communication' ? 'expand' : 'none'} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
+<BarChart data={chartData} onClick={handleBarClick} style={{cursor:'pointer'}} stackOffset={currentView === 'communication' ? 'expand' : 'none'} margin={{top: 20, right: 30, left: 50, bottom: 5}}>
                             <defs><pattern id="stripe" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)"><line x1="0" y="0" x2="0" y2="8" stroke="#FFFFFF" strokeWidth="2" opacity="0.3" /></pattern><mask id="stripe-mask"><rect x="0" y="0" width="100%" height="100%" fill="white" /><rect x="0" y="0" width="100%" height="100%" fill="url(#stripe)" /></mask></defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="#37474F" vertical={false} />
                             <XAxis dataKey="name" stroke="#B0BEC5" tick={{fontSize: 12}} />
                             <YAxis stroke="#B0BEC5" tickFormatter={formatYAxis} tick={{fontSize: 11}} />
-                            <Tooltip content={<DefaultTooltip view={currentView} sourceFilter={source} />} cursor={{ fill: 'transparent' }} />
+                            
+                            {/* Repassamos a variável "year" para o Tooltip saber se é ano atual */}
+                            <Tooltip content={<DefaultTooltip view={currentView} sourceFilter={source} selectedYear={year} />} cursor={{ fill: 'transparent' }} />
+                            
+                            {/* --- LINHA COM CLASSE NOVA E POSIÇÃO TOTALMENTE À ESQUERDA --- */}
+                            {currentView === 'communication' && showGoalLine && (
+                                <ReferenceLine 
+                                    className="pulse-goal-line" 
+                                    y={0.9} 
+                                    stroke="#00E5FF" 
+                                    strokeDasharray="5 5" 
+                                    strokeWidth={2}
+                                    label={{ 
+                                        position: 'left',  /* Coloca o texto totalmente antes do Eixo Y */
+                                        value: 'META: 90%', 
+                                        fill: '#00E5FF', 
+                                        fontSize: 12, 
+                                        fontWeight: 'bold',
+                                        dx: -5,  /* Afasta um pouco do Eixo */
+                                        dy: -5   /* Levita o texto para não ficar em cima do pontilhado */
+                                    }} 
+                                />
+                            )}
+
                             {currentView.startsWith('production') ? (
                                 <>
                                 <Bar dataKey="pb" stackId="a" fill="#546E7A" animationDuration={800} barSize={55} label={(props) => <RenderPBLabel {...props} />} onClick={handleBarClick} style={{cursor:'pointer'}} />
