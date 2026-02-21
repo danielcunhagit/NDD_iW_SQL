@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import "./App.css";
 import { open } from '@tauri-apps/api/shell';
+import { Info } from "lucide-react";
 
 // --- TYPES (Mantidos) ---
 interface DashboardData {
@@ -14,6 +15,12 @@ interface DashboardData {
   projection: { ndd_pb: number; ndd_cor: number; iw_pb: number; iw_cor: number };
   total_equipments: number;
   total_companies: number;
+}
+
+interface MonitoringCompanySummary {
+    empresa: string; mif: number; compatible: number; not_compatible: number;
+    registered: number; not_registered: number; ndd: number; iw: number;
+    possible_canon: number; possible_inter: number; not_possible: number;
 }
 
 interface MonitoringData {
@@ -54,82 +61,329 @@ interface SortConfig {
 type ViewType = 'production_current' | 'production_compare' | 'communication' | 'monitoring';
 
 const MESES = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-const fmtMilhar = (val: number) => val > 0 ? val.toLocaleString('pt-BR') : '0';
+const fmtMilhar = (val: number) => (val !== 0 && val != null) ? val.toLocaleString('pt-BR') : '0';
 const formatDate = (dateStr: string | undefined) => { if (!dateStr || dateStr === "N/D") return "N/D"; try { return new Date(dateStr + "T00:00:00").toLocaleDateString('pt-BR'); } catch { return dateStr; } };
 
 // ... (MonitoringView, RenderLabels e Tooltips MANTIDOS IGUAIS para economizar espaço aqui, mas devem estar no arquivo) ...
 // CÓPIA DOS COMPONENTES VISUAIS (Mantenha os que você já tem: MonitoringView, RenderPBLabel, DefaultTooltip, etc)
-const MonitoringView = ({ data }: { data: MonitoringData | null }) => {
+const MonitoringView = ({ 
+    data, 
+    dashboardData, 
+    companySummaries, 
+    isLoadingSummaries 
+}: { 
+    data: MonitoringData | null;
+    dashboardData: DashboardData | null;
+    companySummaries: MonitoringCompanySummary[];
+    isLoadingSummaries: boolean;
+}) => {
+    const [targetStr, setTargetStr] = useState<string>("82.0");
+    const [showEvolution, setShowEvolution] = useState(false);
+    const [activeDetailFilter, setActiveDetailFilter] = useState<keyof MonitoringCompanySummary | null>(null);
+
+    // Estados de ordenação da tabela modal
+    const [modalSortKey, setModalSortKey] = useState<keyof MonitoringCompanySummary | 'qtde' | 'plataformas'>('qtde');
+    const [modalSortDesc, setModalSortDesc] = useState(true);
+
+    // EFEITO: Sempre que abrir um card novo, reseta a ordenação
+    useEffect(() => {
+        setModalSortKey('qtde');
+        setModalSortDesc(true);
+    }, [activeDetailFilter]);
+
+    // O useEffect que fazia o invoke() sumiu daqui, pois o App agora faz isso!
+
+    // Lógica da Tabela de Evolução Mensal...
+    const evolutionData = useMemo(() => {
+        if (!dashboardData || !dashboardData.communication.length) return null;
+        const monthsMap: Record<string, { ndd: number, iw: number, total: number, ano: number, mes: number }> = {};
+        dashboardData.communication.forEach(r => {
+            const key = `${r.ano}-${String(r.mes).padStart(2, '0')}`;
+            if (!monthsMap[key]) monthsMap[key] = { ndd: 0, iw: 0, total: 0, ano: r.ano, mes: r.mes };
+            const devCount = r.connected + r.disconnected;
+            if (r.source === 'NDD') monthsMap[key].ndd += devCount;
+            if (r.source === 'IW') monthsMap[key].iw += devCount;
+            monthsMap[key].total += devCount;
+        });
+        const sortedKeys = Object.keys(monthsMap).sort((a, b) => b.localeCompare(a));
+        if (sortedKeys.length < 2) return null; 
+        const curr = monthsMap[sortedKeys[0]]; const prev = monthsMap[sortedKeys[1]];
+        const diffNdd = curr.ndd - prev.ndd; const diffIw = curr.iw - prev.iw; const diffTotal = curr.total - prev.total;
+        const pctNdd = prev.ndd > 0 ? (diffNdd / prev.ndd) * 100 : 0; const pctIw = prev.iw > 0 ? (diffIw / prev.iw) * 100 : 0; const pctTotal = prev.total > 0 ? (diffTotal / prev.total) * 100 : 0;
+        return { curr, prev, diffNdd, diffIw, diffTotal, pctNdd, pctIw, pctTotal };
+    }, [dashboardData]);
+
     if (!data) return <div style={{display:'flex', height:'100%', alignItems:'center', justifyContent:'center', color:'#B0BEC5'}}>Carregando diagrama...</div>;
 
-    const ProCard = ({ title, value, total, status = "neutral", hasNext = false }: any) => {
+    // Cálculos do Header de Metas
+    const monitorados = data.registered;
+    const faltaMonitorar = data.possible_canon + data.possible_inter; 
+    const totalBaseMeta = monitorados + faltaMonitorar;
+    const targetPct = parseFloat(targetStr) || 0;
+    const resultPct = totalBaseMeta > 0 ? (monitorados / totalBaseMeta) * 100 : 0;
+    const isTargetMet = resultPct >= targetPct;
+    const targetQtd = Math.ceil(totalBaseMeta * (targetPct / 100));
+    const qtdeAMais = targetQtd > monitorados ? targetQtd - monitorados : 0;
+
+    // --- LÓGICA DE ORDENAÇÃO ATUALIZADA ---
+    const getFilteredDetails = () => {
+        if (!activeDetailFilter || !companySummaries.length) return [];
+        return companySummaries
+            .filter(c => (c[activeDetailFilter] as number) > 0) // Mostra só empresas que tem >0 na métrica
+            .sort((a, b) => {
+                let valA: any;
+                let valB: any;
+
+                // Define os valores que serão comparados dependendo da coluna clicada
+                if (modalSortKey === 'qtde') {
+                    valA = a[activeDetailFilter];
+                    valB = b[activeDetailFilter];
+                } else if (modalSortKey === 'plataformas') {
+                    // Ordena pela quantidade de plataformas (2=Ambas, 1=Uma, 0=Nenhuma)
+                    valA = (a.ndd > 0 ? 1 : 0) + (a.iw > 0 ? 1 : 0);
+                    valB = (b.ndd > 0 ? 1 : 0) + (b.iw > 0 ? 1 : 0);
+                } else {
+                    valA = a[modalSortKey];
+                    valB = b[modalSortKey];
+                }
+
+                if (valA < valB) return modalSortDesc ? 1 : -1;
+                if (valA > valB) return modalSortDesc ? -1 : 1;
+                return 0;
+            });
+    };
+
+    const detailsList = getFilteredDetails();
+    const filterNames: Record<string, string> = { mif: "Parque Total", compatible: "Compatíveis", not_compatible: "Incompatíveis", registered: "Monitorados", not_registered: "Sem Monitoramento", ndd: "NDD Print", iw: "iW Remote", possible_canon: "Oportunidades Canon", possible_inter: "Oportunidades Inter", not_possible: "Não Possível" };
+
+    // Função para alterar a ordenação ao clicar no cabeçalho
+    const handleModalSort = (key: keyof MonitoringCompanySummary | 'qtde' | 'plataformas') => {
+        if (modalSortKey === key) {
+            setModalSortDesc(!modalSortDesc); // Inverte se clicou na mesma
+        } else {
+            setModalSortKey(key);
+            setModalSortDesc(true); // Se clicou em uma nova, começa decrescente
+        }
+    };
+
+    const ProCard = ({ id, title, value, total, status = "neutral", hasNext = false }: any) => {
         const pct = total > 0 ? Math.round((value / total) * 100) : 0;
         return (
-            <div className={`flow-card status-${status} ${hasNext ? 'has-next' : ''} expand`}>
-                <div className="card-header">
-                    <span className="card-title">{title}</span>
-                    {total > 0 && total !== value && <span className="card-pct">{pct}%</span>}
-                </div>
-                <div className="card-body">
-                    <span className="card-value">{fmtMilhar(value)}</span>
-                    <span className="card-label">eqp</span>
-                </div>
+            <div 
+                className={`flow-card status-${status} ${hasNext ? 'has-next' : ''} expand card-clickable`} 
+                onClick={() => setActiveDetailFilter(id)} 
+                title={`Clique para ver as empresas com equipamentos: ${title}`}
+            >
+                <div className="card-header"><span className="card-title">{title}</span>{total > 0 && total !== value && <span className="card-pct">{pct}%</span>}</div>
+                <div className="card-body"><span className="card-value">{fmtMilhar(value)}</span><span className="card-label">eqp</span></div>
             </div>
         );
     };
 
     return (
-        <div className="monitoring-container">
-            {/* Nível 1: Total */}
-            <div className="col-level" style={{flex: 0.8}}>
-                <ProCard title="Parque Total (MIF)" value={data.mif} status="main" hasNext={true} />
-            </div>
+        <div style={{display: 'flex', flexDirection: 'column', height: '100%', width: '100%'}}>
+            
+            {/* --- MODAL DA TABELA DE EVOLUÇÃO --- */}
+            {showEvolution && evolutionData && (
+                <div className="about-overlay" onClick={() => setShowEvolution(false)}>
+                    <div className="about-box" style={{width: '600px', maxWidth: '90%'}} onClick={e => e.stopPropagation()}>
+                        <h2 className="about-title">Evolução de Monitorados</h2>
+                        <p className="about-version">Comparativo do mês corrente vs mês anterior</p>
+                        
+                        <table className="evolution-table">
+                            <thead>
+                                <tr><th>Mês</th><th>NDD</th><th>iW</th><th>Total</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td className="row-header">{MESES[evolutionData.prev.mes]} / {evolutionData.prev.ano}</td>
+                                    <td>{fmtMilhar(evolutionData.prev.ndd)}</td><td>{fmtMilhar(evolutionData.prev.iw)}</td>
+                                    <td style={{fontWeight: 'bold'}}>{fmtMilhar(evolutionData.prev.total)}</td>
+                                </tr>
+                                <tr style={{background: 'rgba(0, 229, 255, 0.05)'}}>
+                                    <td className="row-header">{MESES[evolutionData.curr.mes]} / {evolutionData.curr.ano}</td>
+                                    <td>{fmtMilhar(evolutionData.curr.ndd)}</td><td>{fmtMilhar(evolutionData.curr.iw)}</td>
+                                    <td style={{fontWeight: 'bold'}}>{fmtMilhar(evolutionData.curr.total)}</td>
+                                </tr>
+                                <tr>
+                                    <td className="row-header">Diferença</td>
+                                    <td className={evolutionData.diffNdd >= 0 ? 'diff-pos' : 'diff-neg'}>{evolutionData.diffNdd > 0 ? '+' : ''}{fmtMilhar(evolutionData.diffNdd)}</td>
+                                    <td className={evolutionData.diffIw >= 0 ? 'diff-pos' : 'diff-neg'}>{evolutionData.diffIw > 0 ? '+' : ''}{fmtMilhar(evolutionData.diffIw)}</td>
+                                    <td className={evolutionData.diffTotal >= 0 ? 'diff-pos' : 'diff-neg'}>{evolutionData.diffTotal > 0 ? '+' : ''}{fmtMilhar(evolutionData.diffTotal)}</td>
+                                </tr>
+                                <tr style={{borderTop: '2px solid #546E7A'}}>
+                                    <td className="row-header">% s/ mês anterior</td>
+                                    <td className={evolutionData.pctNdd >= 0 ? 'diff-pos' : 'diff-neg'}>{evolutionData.pctNdd > 0 ? '+' : ''}{evolutionData.pctNdd.toFixed(1)}%</td>
+                                    <td className={evolutionData.pctIw >= 0 ? 'diff-pos' : 'diff-neg'}>{evolutionData.pctIw > 0 ? '+' : ''}{evolutionData.pctIw.toFixed(1)}%</td>
+                                    <td className={evolutionData.pctTotal >= 0 ? 'diff-pos' : 'diff-neg'}>{evolutionData.pctTotal > 0 ? '+' : ''}{evolutionData.pctTotal.toFixed(1)}%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <button className="btn-close-about" style={{marginTop: 25}} onClick={() => setShowEvolution(false)}>Fechar Tabela</button>
+                    </div>
+                </div>
+            )}
 
-            {/* Nível 2: Compatibilidade */}
-            <div className="col-level">
-                <div className="card-group grouped">
-                    <ProCard title="Compatíveis" value={data.compatible} total={data.mif} status="good" hasNext={true} />
-                </div>
-                <div className="card-group grouped">
-                    <ProCard title="Incompatíveis" value={data.not_compatible} total={data.mif} status="bad" />
-                </div>
-            </div>
+            {/* --- MODAL DA TABELA DE DETALHES DE EMPRESAS --- */}
+            {activeDetailFilter && (
+                <div className="about-overlay" onClick={() => setActiveDetailFilter(null)}>
+                    <div className="about-box" style={{width: '950px', maxWidth: '95%', maxHeight: '80vh', display: 'flex', flexDirection: 'column'}} onClick={e => e.stopPropagation()}>
+                        
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15}}>
+                            <h2 className="about-title">{filterNames[activeDetailFilter]}</h2>
+                            <span style={{color: '#00E5FF', fontWeight: 'bold'}}>{fmtMilhar(detailsList.length)} empresas</span>
+                        </div>
+                        
+                        {isLoadingSummaries ? (
+                            <div style={{padding: 40, color: '#00E5FF'}}>Processando dados em segundo plano...</div>
+                        ) : (
+                            <div style={{overflowY: 'auto', flex: 1, border: '1px solid #455A64', borderRadius: 4}}>
+                                <table className="evolution-table" style={{marginTop: 0}}>
+                                    
+                                    {/* CABEÇALHO ORDENÁVEL */}
+                                    <thead style={{position: 'sticky', top: 0, zIndex: 5, userSelect: 'none'}}>
+                                        <tr>
+                                            <th onClick={() => handleModalSort('empresa')} style={{cursor: 'pointer', textAlign: 'left'}}>
+                                                Empresa {modalSortKey === 'empresa' ? (modalSortDesc ? '▼' : '▲') : ''}
+                                            </th>
+                                            <th onClick={() => handleModalSort('qtde')} style={{cursor: 'pointer', width: '13%'}}>
+                                                Qtde ({filterNames[activeDetailFilter]}) {modalSortKey === 'qtde' ? (modalSortDesc ? '▼' : '▲') : ''}
+                                            </th>
+                                            <th onClick={() => handleModalSort('mif')} style={{cursor: 'pointer', width: '12%'}}>
+                                                Parque Total {modalSortKey === 'mif' ? (modalSortDesc ? '▼' : '▲') : ''}
+                                            </th>
+                                            <th onClick={() => handleModalSort('registered')} style={{cursor: 'pointer', width: '15%'}}>
+                                                Monitoradas {modalSortKey === 'registered' ? (modalSortDesc ? '▼' : '▲') : ''}
+                                            </th>
+                                            <th onClick={() => handleModalSort('not_registered')} style={{cursor: 'pointer', width: '15%'}}>
+                                                Não Monitoradas {modalSortKey === 'not_registered' ? (modalSortDesc ? '▼' : '▲') : ''}
+                                            </th>
+                                            <th onClick={() => handleModalSort('plataformas')} style={{cursor: 'pointer', width: '18%'}}>
+                                                Plataformas Ativas {modalSortKey === 'plataformas' ? (modalSortDesc ? '▼' : '▲') : ''}
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {detailsList.map((c, i) => {
+                                            // Cálculos de porcentagem em relação ao Parque Total (MIF)
+                                            const pctMonitorada = c.mif > 0 ? Math.round((c.registered / c.mif) * 100) : 0;
+                                            const pctNaoMonitorada = c.mif > 0 ? Math.round((c.not_registered / c.mif) * 100) : 0;
 
-            {/* Nível 3: Monitoramento */}
-            <div className="col-level">
-                <div className="card-group grouped" style={{flexGrow: 1.5}}>
-                    <ProCard title="Monitorados" value={data.registered} total={data.compatible} status="good" hasNext={true} />
+                                            return (
+                                                <tr key={i}>
+                                                    <td style={{textAlign: 'left', fontWeight: 'bold'}}>{c.empresa}</td>
+                                                    <td style={{color: '#FFD740', fontWeight: 'bold', fontSize: 16}}>{fmtMilhar(c[activeDetailFilter] as number)}</td>
+                                                    <td style={{color: '#B0BEC5'}}>{fmtMilhar(c.mif)}</td>
+                                                    
+                                                    {/* COLUNA MONITORADAS COM PORCENTAGEM */}
+                                                    <td style={{color: '#00E676', fontWeight: 'bold'}}>
+                                                        {fmtMilhar(c.registered)} <span style={{fontSize: 10, opacity: 0.7, fontWeight: 'normal'}}>({pctMonitorada}%)</span>
+                                                    </td>
+                                                    
+                                                    {/* COLUNA NÃO MONITORADAS COM PORCENTAGEM */}
+                                                    <td style={{color: '#EF5350', fontWeight: 'bold'}}>
+                                                        {fmtMilhar(c.not_registered)} <span style={{fontSize: 10, opacity: 0.7, fontWeight: 'normal'}}>({pctNaoMonitorada}%)</span>
+                                                    </td>
+                                                    
+                                                    <td>
+                                                        <div style={{display: 'flex', gap: 5, justifyContent: 'center'}}>
+                                                            {c.ndd > 0 && <span className="source-tag src-ndd" title={`${c.ndd} eqp NDD`}>NDD</span>}
+                                                            {c.iw > 0 && <span className="source-tag src-iw" title={`${c.iw} eqp iW`}>iW</span>}
+                                                            {(c.ndd === 0 && c.iw === 0) && <span style={{color: '#EF5350', fontSize: 10, fontWeight: 'bold'}}>NENHUMA</span>}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                        <button className="btn-close-about" style={{marginTop: 20, alignSelf: 'center'}} onClick={() => setActiveDetailFilter(null)}>Fechar Tabela</button>
+                    </div>
                 </div>
-                <div className="card-group grouped" style={{flexGrow: 1}}>
-                    <ProCard title="Sem Monitoramento" value={data.not_registered} total={data.compatible} status="warn" hasNext={true} />
-                </div>
-                <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div>
-            </div>
+            )}
 
-            {/* Nível 4: Detalhes Finais */}
-            <div className="col-level">
-                {/* Detalhes de Monitorados */}
-                <div className="card-group grouped" style={{flexGrow: 1.5}}>
-                    <ProCard title="NDD Print" value={data.ndd} total={data.registered} status="neutral" />
-                    <ProCard title="iW Remote" value={data.iw} total={data.registered} status="neutral" />
+            {/* --- HEADER KPI DE METAS --- */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#37474F', padding: '15px 25px', borderBottom: '1px solid #546E7A', boxShadow: '0 4px 6px rgba(0,0,0,0.3)', zIndex: 10, flexShrink: 0 }}>
+                <div style={{display: 'flex', gap: '15px'}}>
+                    <div style={{display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.2)', padding: '10px 15px', borderRadius: '6px', border: '1px solid #455A64'}}>
+                        <span style={{fontSize: 10, color: '#B0BEC5', textTransform: 'uppercase', fontWeight: 'bold'}}>Total Possível Monitoramento</span>
+                        <span style={{fontSize: 18, color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(totalBaseMeta)}</span>
+                    </div>
+
+                    <div 
+                        className="card-clickable"
+                        onClick={() => { if(evolutionData) setShowEvolution(true); }}
+                        style={{display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.2)', padding: '10px 15px', borderRadius: '6px', border: '1px solid #455A64', cursor: evolutionData ? 'pointer' : 'default', position: 'relative'}}
+                        title={evolutionData ? "Clique para ver a evolução mês a mês" : "Dados insuficientes para evolução"}
+                    >
+                        <span style={{fontSize: 10, color: '#B0BEC5', textTransform: 'uppercase', fontWeight: 'bold'}}>
+                            Monitorados (iW+NDD) {evolutionData && <span style={{fontSize: 12, marginLeft: 4}}></span>}
+                        </span>
+                        <span style={{fontSize: 18, color: '#00E676', fontWeight: 'bold'}}>{fmtMilhar(monitorados)}</span>
+                    </div>
+
+                    <div style={{display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.2)', padding: '10px 15px', borderRadius: '6px', border: '1px solid #455A64'}}>
+                        <span style={{fontSize: 10, color: '#B0BEC5', textTransform: 'uppercase', fontWeight: 'bold'}}>Falta Monitorar</span>
+                        <span style={{fontSize: 18, color: '#EF5350', fontWeight: 'bold'}}>{fmtMilhar(faltaMonitorar)}</span>
+                    </div>
                 </div>
 
-                {/* Detalhes de Sem Monitoramento (Oportunidades) */}
-                <div className="card-group grouped" style={{flexGrow: 1}}>
-                    <div style={{display:'flex', flexDirection:'column', gap: 5, padding:'8px', background:'rgba(0,0,0,0.2)', borderRadius:4, border:'1px solid #546E7A', marginBottom: 5}}>
-                        <div style={{fontSize:9, color:'#B0BEC5', fontWeight:'bold', marginBottom:2, textAlign:'center'}}>OPORTUNIDADES (POSSÍVEL)</div>
-                        <div style={{display:'flex', gap:5}}>
-                            <div style={{flex:1}}><ProCard title="Canon" value={data.possible_canon} status="good" /></div>
-                            <div style={{flex:1}}><ProCard title="Inter" value={data.possible_inter} status="warn" /></div>
+                <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: isTargetMet ? 'rgba(0, 230, 118, 0.1)' : 'rgba(239, 83, 80, 0.1)', border: `2px solid ${isTargetMet ? '#00E676' : '#EF5350'}`, padding: '10px 20px', borderRadius: '8px', minWidth: '130px' }}>
+                        <span style={{fontSize: 10, color: isTargetMet ? '#00E676' : '#EF5350', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: 2}}>Percentual Monitorado</span>
+                        <span style={{fontSize: 26, color: isTargetMet ? '#00E676' : '#EF5350', fontWeight: 'bold'}}>{resultPct.toFixed(2).replace('.', ',')}%</span>
+                    </div>
+                    <div style={{color: '#546E7A', fontSize: 20}}>➞</div>
+                    <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
+                        <span style={{fontSize: 10, color: '#00E5FF', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: 5}}>Meta Alvo (%)</span>
+                        <div style={{display: 'flex', alignItems: 'baseline'}}>
+                            <input type="number" step="0.1" value={targetStr} onChange={(e) => setTargetStr(e.target.value)} style={{ background: 'transparent', border: 'none', borderBottom: '2px solid #00E5FF', color: '#fff', fontSize: 26, fontWeight: 'bold', width: '80px', textAlign: 'center', outline: 'none' }} />
                         </div>
                     </div>
-                    <ProCard title="Não Possível" value={data.not_possible} total={data.not_registered} status="bad" />
+                    <div style={{width: '1px', height: '40px', background: '#546E7A', margin: '0 5px'}}></div>
+                    <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '120px'}}>
+                        <span style={{fontSize: 10, color: '#B0BEC5', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: 5}}>Qtde Equiptos a Mais</span>
+                        {qtdeAMais > 0 ? (
+                            <span style={{fontSize: 26, color: '#FFD740', fontWeight: 'bold'}}>{fmtMilhar(qtdeAMais)}</span>
+                        ) : (
+                            <span style={{fontSize: 14, color: '#00E676', fontWeight: 'bold', marginTop: 8}}>META ATINGIDA ✓</span>
+                        )}
+                    </div>
                 </div>
-                <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div>
             </div>
 
-            <div style={{position:'absolute', bottom: 10, right: 20, fontSize: 10, color: '#546E7A'}}>
-                Ref: {formatDate(data.last_date)}
+            {/* --- DIAGRAMA DE ÁRVORE --- */}
+            <div className="monitoring-container" style={{flex: 1, position: 'relative'}}>
+                <div className="col-level" style={{flex: 0.8}}><ProCard id="mif" title="Parque Total (MIF)" value={data.mif} status="main" hasNext={true} /></div>
+                <div className="col-level">
+                    <div className="card-group grouped"><ProCard id="compatible" title="Compatíveis" value={data.compatible} total={data.mif} status="good" hasNext={true} /></div>
+                    <div className="card-group grouped"><ProCard id="not_compatible" title="Incompatíveis" value={data.not_compatible} total={data.mif} status="bad" /></div>
+                </div>
+                <div className="col-level">
+                    <div className="card-group grouped" style={{flexGrow: 1.5}}><ProCard id="registered" title="Monitorados" value={data.registered} total={data.compatible} status="good" hasNext={true} /></div>
+                    <div className="card-group grouped" style={{flexGrow: 1}}><ProCard id="not_registered" title="Sem Monitoramento" value={data.not_registered} total={data.compatible} status="warn" hasNext={true} /></div>
+                    <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div>
+                </div>
+                <div className="col-level">
+                    <div className="card-group grouped" style={{flexGrow: 1.5}}>
+                        <ProCard id="ndd" title="NDD Print" value={data.ndd} total={data.registered} status="neutral" />
+                        <ProCard id="iw" title="iW Remote" value={data.iw} total={data.registered} status="neutral" />
+                    </div>
+                    <div className="card-group grouped" style={{flexGrow: 1}}>
+                        <div style={{display:'flex', flexDirection:'column', gap: 5, padding:'8px', background:'rgba(0,0,0,0.2)', borderRadius:4, border:'1px solid #546E7A', marginBottom: 5}}>
+                            <div style={{fontSize:9, color:'#B0BEC5', fontWeight:'bold', marginBottom:2, textAlign:'center'}}>OPORTUNIDADES (POSSÍVEL)</div>
+                            <div style={{display:'flex', gap:5}}>
+                                <div style={{flex:1}}><ProCard id="possible_canon" title="Canon" value={data.possible_canon} status="good" /></div>
+                                <div style={{flex:1}}><ProCard id="possible_inter" title="Inter" value={data.possible_inter} status="warn" /></div>
+                            </div>
+                        </div>
+                        <ProCard id="not_possible" title="Não Possível" value={data.not_possible} total={data.not_registered} status="bad" />
+                    </div>
+                    <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div>
+                </div>
+                <div style={{position:'absolute', bottom: 10, right: 20, fontSize: 10, color: '#546E7A'}}>Ref: {formatDate(data.last_date)}</div>
             </div>
         </div>
     );
@@ -183,7 +437,7 @@ const RenderCommLabel = ({ x, y, width, height, payload, type }: any) => {
     ); 
 };
 const RenderCompLabel = ({ x, y, width, value, fill }: any) => { if (!value) return null; return <text x={x + width / 2} y={y - 5} fill={fill} textAnchor="middle" fontSize={10} fontWeight="bold">{fmtMilhar(value)}</text>; };
-const DefaultTooltip = ({ active, payload, label, view, sourceFilter, selectedYear }: any) => { 
+const DefaultTooltip = ({ active, payload, label, view, selectedYear }: any) => { 
     if (active && payload && payload.length) { 
         const d = payload[0].payload; 
         if (view.startsWith('production') && (d.pb + d.cor) === 0) return null; 
@@ -256,7 +510,8 @@ const DefaultTooltip = ({ active, payload, label, view, sourceFilter, selectedYe
 const ComparisonTooltip = ({ active, payload, label, selectedYear, lastUpdateDate }: any) => { if (active && payload && payload.length >= 2) { const prevData = payload.find((p: any) => p.dataKey === "prev_total"); const currData = payload.find((p: any) => p.dataKey === "curr_total"); if (!prevData || !currData) return null; const d = payload[0].payload; const prevVal = prevData.value; const currVal = currData.value; let dbDay = 0; let dbMonth = 0; let dbYear = 0; if (lastUpdateDate && lastUpdateDate !== "N/D") { const parts = lastUpdateDate.split('-'); if(parts.length === 3) { dbYear = parseInt(parts[0]); dbMonth = parseInt(parts[1]); dbDay = parseInt(parts[2]); } } const monthIndex = MESES.indexOf(label); const isCurrentMonthInDb = (selectedYear === dbYear) && (monthIndex === dbMonth); const isFutureMonth = (selectedYear === dbYear) && (monthIndex > dbMonth); let currentLabelText = `${currData.name}`; if (isCurrentMonthInDb && dbDay > 0) { currentLabelText = `Prod. até ${dbDay.toString().padStart(2, '0')}/${dbMonth.toString().padStart(2, '0')}`; } let diffDisplay = <></>; let estimateRow = <></>; if (prevVal > 0) { if (currVal === 0 && isFutureMonth) { diffDisplay = <span style={{color: '#90A4AE', fontStyle: 'italic', fontSize: 11}}>Aguardando dados...</span>; } else { let valToCompare = currVal; let isEstComparison = false; if (isCurrentMonthInDb && d.total_proj > currVal) { valToCompare = d.total_proj; isEstComparison = true; estimateRow = ( <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 11 }}> <span style={{color: '#FFD740', fontStyle: 'italic'}}>Produção estimada:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(d.total_proj)}</span> </div> ); } const diffPct = ((valToCompare - prevVal) / prevVal) * 100; let colorDiff = "#B0BEC5"; let diffText = "Estável"; if (diffPct > 0) { diffText = "Aumento"; colorDiff = "#00E676"; } else if (diffPct < 0) { diffText = "Diminuição"; colorDiff = "#EF5350"; } let diffSuffix = isEstComparison ? " (Est.)" : ""; diffDisplay = <span style={{color: colorDiff}}>{diffText}{diffSuffix} {Math.abs(diffPct).toFixed(2)}%</span>; } } else if (currVal > 0) { diffDisplay = <span style={{color: "#00E676"}}>Novo (100.00%)</span>; } return ( <div style={{ background: '#263238', border: '1px solid #546E7A', padding: '12px', borderRadius: '6px', minWidth: 180, zIndex: 100 }}> <p style={{ fontWeight: 'bold', color: 'white', marginBottom: 8, fontSize: 13, textAlign: 'center', borderBottom: '1px solid #455A64', paddingBottom: 4 }}>{label}</p> <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}> <span style={{color: '#90A4AE'}}>{prevData.name}:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(prevVal)}</span> </div> <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}> <span style={{color: '#00E5FF'}}>{currentLabelText}:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(currVal)}</span> </div> {estimateRow} <div style={{ borderTop: '1px solid #455A64', paddingTop: 6, textAlign: 'center', fontSize: 13, fontWeight: 'bold' }}>{diffDisplay}</div> </div> ); } return null; };
 
 function App() {
-const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [showAbout, setShowAbout] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [splashStatus, setSplashStatus] = useState("Iniciando...");
   const [splashProgress, setSplashProgress] = useState(10);
   const [splashError, setSplashError] = useState<string | null>(null);
@@ -267,6 +522,8 @@ const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [consolidatedData, setConsolidatedData] = useState<DashboardData | null>(null);
   const [companyCache, setCompanyCache] = useState<Record<string, DashboardData>>({}); 
   const [monitoringData, setMonitoringData] = useState<MonitoringData | null>(null);
+  const [companySummaries, setCompanySummaries] = useState<MonitoringCompanySummary[]>([]);
+  const [isLoadingSummaries, setIsLoadingSummaries] = useState(false);
   const [showGoalLine, setShowGoalLine] = useState(false);
   const [bgLoading, setBgLoading] = useState(false);
   const [areCompaniesReady, setAreCompaniesReady] = useState(false);
@@ -297,58 +554,81 @@ const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [panelCache, setPanelCache] = useState<Record<string, any[]>>({});
   const fetchedKeys = useRef<Set<string>>(new Set());
 
-  // --- PRÉ-CARREGAMENTO EM BACKGROUND ---
+// --- PRÉ-CARREGAMENTO E LOGS APRIMORADOS ---
   useEffect(() => {
       if (!data || !data.production) return;
 
-      // Descobre todos os meses que têm produção no ano atual, ordenando do mais recente para o mais antigo
       const monthsToFetch = [...new Set(
           data.production
               .filter(p => p.ano === year && (p.pb + p.cor) > 0)
               .map(p => p.mes)
       )].sort((a, b) => b - a);
 
-      if (monthsToFetch.length === 0) return;
+      if (monthsToFetch.length === 0) {
+          setStatusText(`Pronto: ${year} | ${source}`);
+          return;
+      }
 
       let isCancelled = false;
 
       const prefetchAll = async () => {
           const isGeneralView = !selectedCompany;
           const command = isGeneralView ? "fetch_month_summary_cmd" : "fetch_month_details_cmd";
+          let fetchCount = 0;
 
           for (const month of monthsToFetch) {
-              if (isCancelled) break; // Se o usuário mudar de tela/filtro, cancela a fila atual
+              if (isCancelled) break;
 
               const cacheKey = `${year}-${selectedCompany || 'GERAL'}-${month}`;
-              
-              // Se já baixou ou está baixando, pula para o próximo mês
               if (fetchedKeys.current.has(cacheKey) || panelCache[cacheKey]) continue;
 
-              fetchedKeys.current.add(cacheKey); // Marca que já fomos buscar
-
+              fetchedKeys.current.add(cacheKey);
               try {
+                  // Atualiza o rodapé em tempo real avisando qual mês está sendo baixado silenciosamente
+                  setStatusText(`Baixando dados em 2º plano: ${MESES[month]}/${year}...`);
+                  
                   const args: any = { year, month };
                   if (!isGeneralView) args.company = selectedCompany;
 
                   const res = await invoke<any[]>(command, args);
                   if (isCancelled) break;
 
-                  // Salva os dados silenciosamente no cache do painel
                   setPanelCache(prev => ({ ...prev, [cacheKey]: res }));
+                  fetchCount++;
 
-                  // Dá um respiro de 300ms entre cada requisição para não travar o banco de dados nem a interface
-                  await new Promise(r => setTimeout(r, 300));
+                  // Dá um respiro para não travar a interface
+                  await new Promise(r => setTimeout(r, 400));
               } catch (err) {
-                  console.error(`Erro ao pré-carregar mês ${month}:`, err);
-                  fetchedKeys.current.delete(cacheKey); // Tira da lista para tentar depois
+                  fetchedKeys.current.delete(cacheKey);
+              }
+          }
+
+          // Quando terminar de baixar tudo, avisa que está pronto
+          if (!isCancelled) {
+              if (fetchCount > 0) {
+                  setStatusText(`Pronto! ${fetchCount} meses armazenados em cache rápido.`);
+                  setTimeout(() => { if (!isCancelled) setStatusText(`Visualizando: ${year} | ${source}`); }, 4000);
+              } else {
+                  setStatusText(`Visualizando: ${year} | ${source}`);
               }
           }
       };
 
       prefetchAll();
-
       return () => { isCancelled = true; };
-  }, [data, year, selectedCompany]);
+  }, [data, year, selectedCompany, source]); // <--- Adicionado o 'source' aqui para atualizar o texto ao mudar a fonte
+
+  // Atualiza as empresas quando o ano muda
+  useEffect(() => { 
+      if(!isInitialLoad && areCompaniesReady) { 
+          setStatusText(`Verificando empresas ativas em ${year}...`);
+          invoke<string[]>("fetch_companies", { year: year })
+            .then(list => {
+                setCompanyList(list);
+                setStatusText(`Lista de empresas de ${year} atualizada.`);
+            });
+      } 
+  }, [year, areCompaniesReady, isInitialLoad]);
 
   // --- NOVOS ESTADOS PARA O MODAL DE RECONEXÃO ---
   const [connectionError, setConnectionError] = useState(false);
@@ -407,7 +687,21 @@ const [isInitialLoad, setIsInitialLoad] = useState(true);
                 setConsolidatedData(prev => { if (!prev) return historyData; return { ...prev, production: [...prev.production, ...historyData.production], communication: [...prev.communication, ...historyData.communication] }; });
                 setStatusText("Histórico completo."); setBgLoading(false);
             }).catch(console.error);
-            invoke<MonitoringData>("fetch_monitoring_data").then(setMonitoringData);
+            invoke<MonitoringData>("fetch_monitoring_data").then(res => {
+    setMonitoringData(res);
+    
+    // Assim que terminar o diagrama, começa a baixar a tabela pesada silenciosamente
+    setIsLoadingSummaries(true);
+    invoke<MonitoringCompanySummary[]>("fetch_monitoring_company_summary")
+        .then(summaries => {
+            setCompanySummaries(summaries);
+            setIsLoadingSummaries(false);
+        })
+        .catch(err => {
+            console.error("Erro ao pré-carregar tabela de empresas:", err);
+            setIsLoadingSummaries(false);
+        });
+});
         } catch (err) { 
             console.error("ERRO CRÍTICO:", err); 
             // ALTERAÇÃO AQUI: Mensagem fixa em vez de 'String(err)'
@@ -667,7 +961,7 @@ const changePanelMonth = (delta: number) => {
             </div>
           )}
           
-          <div className="splash-version">v1.0.0</div>
+          <div className="splash-version">v1.0</div>
         </div>
       )}
       {isLoadingData && !isInitialLoad && ( <div className="loading-modal-overlay"> <div className="loading-box"> <div className="loading-spinner"></div> <div className="loading-text">{loadingMsg}</div> </div> </div> )}
@@ -690,6 +984,23 @@ const changePanelMonth = (delta: number) => {
                         Sair
                     </button>
                 </div>
+            </div>
+        </div>
+      )}
+
+      {/* --- MODAL SOBRE (ABOUT) --- */}
+      {showAbout && (
+        <div className="about-overlay" onClick={() => setShowAbout(false)}>
+            <div className="about-box" onClick={e => e.stopPropagation()}>
+                <h2 className="about-title">Monitoramento RPA</h2>
+                <p className="about-version">Versão 1.0</p>
+                <div className="about-content">
+                    <p>Sistema de consolidação e monitoramento do parque de impressões.</p>
+                    <p style={{marginTop: '10px'}}>Integração com <b>NDD Print</b> e <b>iW Remote</b>.</p>
+                </div>
+                <button className="btn-close-about" onClick={() => setShowAbout(false)}>
+                    Fechar
+                </button>
             </div>
         </div>
       )}
@@ -811,7 +1122,14 @@ const changePanelMonth = (delta: number) => {
         </header>
 
         <div className="chart-frame">
-            {currentView === 'monitoring' ? ( <MonitoringView data={monitoringData} /> ) : (
+                            {currentView === 'monitoring' ? ( 
+                    <MonitoringView 
+                        data={monitoringData} 
+                        dashboardData={data} 
+                        companySummaries={companySummaries}
+                        isLoadingSummaries={isLoadingSummaries}
+                    /> 
+                ) : (
                 <ResponsiveContainer width="100%" height="100%">
                     {currentView === 'production_compare' ? (
                         <BarChart data={chartData} onClick={handleBarClick} style={{cursor:'pointer'}} barGap={2} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
@@ -886,17 +1204,22 @@ const changePanelMonth = (delta: number) => {
             <div className="separator">|</div>
             <div className="footer-item" onClick={() => open('https://www.canon.com.br')} style={{cursor: 'pointer'}}><span>iW:</span> <b>{formatDate(data?.last_update_iw)}</b></div>
           </div>
-          <div className="footer-right">
-              {currentView !== 'monitoring' && <>
-                  <span className="footer-stat">Empresas: <b>{footerStats.companies.toLocaleString()}</b></span>
-                  <span className="separator">|</span>
-                  <span className="footer-stat">Equipamentos: <b>{footerStats.equipments.toLocaleString()}</b></span>
-                  <span className="separator">|</span>
-              </>}
-              {(bgLoading || !areCompaniesReady) && <span className="footer-spinner"></span>}
-              <span className="status-text">{statusText}</span>
-          </div>
-        </footer>
+        <div className="footer-right">
+                    {currentView !== 'monitoring' && <>
+                        <span className="footer-stat" title="Total de empresas ativas no ano selecionado">Empresas no Ano: <b>{footerStats.companies.toLocaleString()}</b></span>
+                        <span className="separator">|</span>
+                        <span className="footer-stat">Equipamentos: <b>{footerStats.equipments.toLocaleString()}</b></span>
+                        <span className="separator">|</span>
+                    </>}
+                    {(bgLoading || !areCompaniesReady) && <span className="footer-spinner"></span>}
+                    <span className="status-text">{statusText}</span>
+                    
+                    {/* --- ÍCONE DISCRETO DO SOBRE --- */}
+                    <button className="about-icon-btn" onClick={() => setShowAbout(true)} title="Sobre o Sistema">
+                        <Info size={16} />
+                    </button>
+                </div>
+            </footer>
       </div>
       )}
     </>

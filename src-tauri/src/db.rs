@@ -51,6 +51,17 @@ struct RawNddMif {
     // Se a coluna existir no seu banco, descomente ou adicione na query
 }
 
+#[derive(FromRow, Debug)]
+struct RawIwMifSummary {
+    serial: Option<String>,
+    empresa: Option<String>,
+    compativel: Option<String>,
+    cadastrado: Option<String>,
+    possivel: Option<String>,
+    status: Option<String>,
+    item_code: Option<String>,
+}
+
 impl Database {
     pub async fn new(conn_str: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let pool = MssqlPoolOptions::new()
@@ -483,5 +494,88 @@ pub async fn get_monitoring_stats(&self) -> Result<crate::models::MonitoringData
     pub async fn get_last_date(&self, table_view: &str) -> String {
         let query = format!("SELECT TOP 1 CONVERT(varchar, data, 23) FROM {} ORDER BY data DESC", table_view);
         sqlx::query_scalar::<_, String>(&query).fetch_one(&self.pool).await.unwrap_or_else(|_| "N/D".to_string())
+    }
+    pub async fn get_monitoring_company_summary(&self) -> Result<Vec<crate::models::MonitoringCompanySummary>, Box<dyn Error + Send + Sync>> {
+        let sql_ndd = r#"SELECT DISTINCT UPPER(RTRIM(LTRIM(SerialNumber))) as serial FROM vw_NDD WHERE data = (SELECT MAX(data) FROM vw_NDD)"#;
+        
+        // Query parecida com a original, mas agora puxa o nome da Empresa
+        let sql_iw = r#"
+            SELECT 
+                UPPER(RTRIM(LTRIM([Serial#]))) as serial, 
+                ISNULL([Ship To Name], 'N/D') as empresa,
+                LOWER(CAST([Compativel iW] as varchar)) as compativel, 
+                LOWER(CAST([Cadastrado no iW] as varchar)) as cadastrado, 
+                LOWER(CAST([Possível cadastrar iW] as varchar)) as possivel, 
+                LOWER(CAST([status] as varchar)) as status,
+                UPPER(RTRIM(LTRIM([Item Code]))) as item_code
+            FROM vw_IW_Main 
+            WHERE data = (SELECT MAX(data) FROM vw_IW_Main)
+        "#;
+
+        let (ndd_rows, iw_rows) = tokio::join!(
+            sqlx::query_scalar::<_, String>(sql_ndd).fetch_all(&self.pool),
+            sqlx::query_as::<_, RawIwMifSummary>(sql_iw).fetch_all(&self.pool)
+        );
+
+        let ndd_serials_vec = ndd_rows?;
+        let iw_data = iw_rows?;
+
+        let ndd_set: std::collections::HashSet<String> = ndd_serials_vec.into_iter().collect();
+        let mut ndd_compatible_models = std::collections::HashSet::new();
+
+        for r in &iw_data {
+            if let Some(serial) = &r.serial {
+                if ndd_set.contains(serial) {
+                    if let Some(code) = &r.item_code {
+                        if !code.trim().is_empty() { ndd_compatible_models.insert(code.clone()); }
+                    }
+                }
+            }
+        }
+
+        let mut map: HashMap<String, crate::models::MonitoringCompanySummary> = HashMap::new();
+
+        let is_sim = |opt: &Option<String>| -> bool { 
+            if let Some(s) = opt { let v = s.trim(); v == "sim" || v == "s" || v == "1" || v == "yes" } else { false } 
+        };
+
+        for r in &iw_data {
+            let serial = r.serial.as_deref().unwrap_or("").to_string();
+            let empresa = r.empresa.as_deref().unwrap_or("N/D").to_string();
+            
+            // Cria a "gaveta" da empresa se não existir
+            let entry = map.entry(empresa.clone()).or_insert(crate::models::MonitoringCompanySummary {
+                empresa, mif: 0, compatible: 0, not_compatible: 0, registered: 0, not_registered: 0,
+                ndd: 0, iw: 0, possible_canon: 0, possible_inter: 0, not_possible: 0,
+            });
+
+            entry.mif += 1; // +1 equipamento para a empresa
+
+            let comp_iw = is_sim(&r.compativel);
+            let comp_ndd = r.item_code.as_ref().map(|code| ndd_compatible_models.contains(code)).unwrap_or(false);
+            if comp_iw || comp_ndd { entry.compatible += 1; } else { entry.not_compatible += 1; }
+
+            let in_ndd = ndd_set.contains(&serial);
+            let in_iw = is_sim(&r.cadastrado);
+
+            if in_ndd || in_iw {
+                entry.registered += 1;
+                if in_ndd { entry.ndd += 1; }
+                if in_iw && !in_ndd { entry.iw += 1; } // Exclusivo iW
+            } else {
+                entry.not_registered += 1;
+                if is_sim(&r.possivel) {
+                    let st = r.status.as_deref().unwrap_or("");
+                    if st.contains("canon") { entry.possible_canon += 1; } 
+                    else if st.contains("inter") { entry.possible_inter += 1; }
+                } else {
+                    entry.not_possible += 1;
+                }
+            }
+        }
+
+        let mut result: Vec<_> = map.into_values().collect();
+        result.sort_by(|a, b| b.mif.cmp(&a.mif)); // Ordena do maior cliente para o menor
+        Ok(result)
     }
 }

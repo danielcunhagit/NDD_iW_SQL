@@ -361,6 +361,13 @@ async fn fetch_dashboard_data(window: Window, state: tauri::State<'_, AppState>,
 }
 
 #[tauri::command]
+async fn fetch_monitoring_company_summary(state: tauri::State<'_, AppState>) -> Result<Vec<models::MonitoringCompanySummary>, String> {
+    let db_guard = state.db.lock().await;
+    let db = db_guard.as_ref().ok_or("Banco desconectado")?;
+    db.get_monitoring_company_summary().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn fetch_monitoring_data(window: Window, state: tauri::State<'_, AppState>) -> Result<MonitoringData, String> {
     {
         let cache = state.monitoring_cache.lock().await;
@@ -385,7 +392,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             fetch_dashboard_data, fetch_companies, perform_initial_load, 
             fetch_full_history, finalize_startup, quit_app, fetch_monitoring_data,
-            fetch_month_details_cmd, fetch_month_summary_cmd // <--- ESSENCIAL
+            fetch_month_details_cmd, fetch_month_summary_cmd, fetch_monitoring_company_summary
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

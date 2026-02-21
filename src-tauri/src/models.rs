@@ -83,3 +83,18 @@ pub struct CompanySummary {
     pub offline: i32, // > 7 dias
     pub producao: i64,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MonitoringCompanySummary {
+    pub empresa: String,
+    pub mif: i64,
+    pub compatible: i64,
+    pub not_compatible: i64,
+    pub registered: i64,
+    pub not_registered: i64,
+    pub ndd: i64,
+    pub iw: i64,
+    pub possible_canon: i64,
+    pub possible_inter: i64,
+    pub not_possible: i64,
+}

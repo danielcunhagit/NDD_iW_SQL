@@ -7,7 +7,7 @@
   },
   "package": {
     "productName": "ndd-sql",
-    "version": "1.1.1"
+    "version": "1.0.0"
   },
   "tauri": {
     "allowlist": {
@@ -17,17 +17,30 @@
         "open": true
       }
     },
-    "bundle": {
+  "bundle": {
+        "active": true,
+        "targets": ["nsis", "updater"],
+        "identifier": "com.ndd-sql.monitoramento",
+        "icon": [
+          "icons/32x32.png",
+          "icons/128x128.png",
+          "icons/128x128@2x.png",
+          "icons/icon.icns",
+          "icons/icon.ico"
+        ],
+        "windows": {
+          "nsis": {
+            "installMode": "currentUser"
+          }
+        }
+      },
+      "updater": {
       "active": true,
-      "targets": "all",
-      "identifier": "com.ndd-sql.monitoramento",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ]
+      "dialog": true,
+      "endpoints": [
+        "https://raw.githubusercontent.com/danielcunhagit/NDD_iW_SQL/main/updater.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFQkNDNTdEOUFGRUUzN0QKUldSOTQvNmFmY1c4M2dsLzVWRElxNldWWVBYajRpQXF2K0lGUm1wMjBjV3ZacHc0aXRIYWY2Z1EK"
     },
     "security": {
       "csp": null
