@@ -988,16 +988,44 @@ const changePanelMonth = (delta: number) => {
         </div>
       )}
 
-      {/* --- MODAL SOBRE (ABOUT) --- */}
+{/* --- MODAL SOBRE (ABOUT) --- */}
       {showAbout && (
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
-            <div className="about-box" onClick={e => e.stopPropagation()}>
+            <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
                 <p className="about-version">Versão 1.0</p>
+                
                 <div className="about-content">
-                    <p>Sistema de consolidação e monitoramento do parque de impressões.</p>
-                    <p style={{marginTop: '10px'}}>Integração com <b>NDD Print</b> e <b>iW Remote</b>.</p>
+                    <p style={{textAlign: 'justify', marginBottom: '15px'}}>
+                        O <strong>Monitoramento RPA</strong> é uma ferramenta analítica de alto desempenho projetada para consolidar e auditar o parque de impressões. 
+                        A aplicação unifica dados de telemetria do <strong>NDD Print</strong> e do <strong>Canon iW Remote</strong>, oferecendo uma visão centralizada sobre a produção de páginas, saúde de comunicação dos equipamentos e acompanhamento preciso das metas de monitoramento em todo o ecossistema corporativo.
+                    </p>
+
+                    <div style={{ borderTop: '1px solid #455A64', margin: '15px 0' }}></div>
+
+                    <h3 style={{ color: '#fff', fontSize: '13px', marginBottom: '12px', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                        Stack Tecnológico
+                    </h3>
+                    
+                    {/* Grid em duas colunas para listar as tecnologias COM AS VERSÕES REAIS */}
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>Tauri:</b> v1.6 (Desktop Engine)</li>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>Rust:</b> v1.92.0 (Core Backend)</li>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>React:</b> v19.1.0 (Interface)</li>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>TypeScript:</b> v5.8.3 (Tipagem)</li>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>Vite:</b> v7.0.4 (Build Tool)</li>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>Recharts:</b> v3.6.0 (Gráficos)</li>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>SQLx:</b> v0.6.3 (Banco de Dados)</li>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>Lucide:</b> v0.562.0 (Ícones)</li>
+                    </ul>
+
+                    <div style={{ borderTop: '1px solid #455A64', margin: '15px 0' }}></div>
+                    
+                    <p style={{ fontSize: '11px', textAlign: 'center', color: '#78909C', fontStyle: 'italic' }}>
+                        Desenvolvido com arquitetura assíncrona para alta performance, utilizando processamento nativo em segundo plano e gerenciamento inteligente de memória em cache.
+                    </p>
                 </div>
+
                 <button className="btn-close-about" onClick={() => setShowAbout(false)}>
                     Fechar
                 </button>

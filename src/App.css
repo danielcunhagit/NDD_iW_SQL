@@ -709,7 +709,32 @@ footer {
 
 .about-title { color: #fff; font-size: 18px; font-weight: bold; margin: 0 0 5px 0; letter-spacing: 1px; }
 .about-version { color: var(--accent); font-size: 12px; font-family: monospace; margin-bottom: 20px; font-weight: bold; }
-.about-content { color: #B0BEC5; font-size: 13px; line-height: 1.5; margin-bottom: 25px; }
+.about-content { 
+  color: #B0BEC5; 
+  font-size: 13px; 
+  line-height: 1.5; 
+  margin-bottom: 25px; 
+  max-height: 250px; /* Limita a altura para forçar a rolagem */
+  overflow-y: auto;  /* Ativa o scroll vertical */
+  padding-right: 15px; /* Espaço para a barra não encostar no texto */
+  text-align: left;  /* Texto longo fica melhor alinhado à esquerda */
+}
+
+/* --- Estilizando a barra de rolagem do modal --- */
+.about-content::-webkit-scrollbar {
+  width: 6px;
+}
+.about-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+.about-content::-webkit-scrollbar-thumb {
+  background: #546E7A;
+  border-radius: 4px;
+}
+.about-content::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
 
 .btn-close-about {
   background: rgba(255, 255, 255, 0.05); border: 1px solid #546E7A; color: #fff;
