@@ -1,11 +1,11 @@
 {
-  "version": "v1.1.0",
-  "notes": "Atualização 1.1.0 disponível! \n\nNovidades:\n- Novo design do menu Sobre com lista de tecnologias (Scrollável).\n- Inclusão dos percentuais nas tabelas de Monitoradas/Não Monitoradas.\n- Correção de bugs visuais e ordenação das tabelas.",
+  "version": "v1.1.1",
+  "notes": "Atualização 1.1.1 disponível! \n\nNovidades:\n- Novo design do menu Sobre com lista de tecnologias (Scrollável).\n- Inclusão dos percentuais nas tabelas de Monitoradas/Não Monitoradas.\n- Correção de bugs visuais e ordenação das tabelas.",
   "pub_date": "2026-02-23T14:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM2JiL2hmYlFXZmZlbk1ubWpxQ2I3dGdsUWZHZGtOUHNyZnUySHJCZmJwSm1oL3BpaG01RXlwT0l6cW9hMnVXK3ZHdmNXZlMrZ1JsV1dDM0k1NFZwQ2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcxODcwMDQxCWZpbGU6bmRkLXNxbF8xLjEuMF94NjQtc2V0dXAubnNpcy56aXAKMTRkNFNSMml0VURLcWdPa2NoQjFHWW41Q1kycEpOT2l1Rys5WWhBbXd5Ly9Ocm45U1ZESkpVQi9zSkEyd2pZWHVIYk5JVUp6OGNkUEwwZnQwSEE2QkE9PQo=",
-      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.0/ndd-sql_1.1.0_x64-setup.nsis.zip"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1ZZdlU4dWwxRmhrc2JSeVd3SENwT2dDMUZFeFVMK2UwbFYvYUIrZzltS1ZiL3ZBVnhwdnpiZTI1NEpjdUw0MDlsa2ZoUGtkK3dMVytPcHRHVHkrUlFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcxODcyMjk2CWZpbGU6bmRkLXNxbF8xLjEuMV94NjQtc2V0dXAubnNpcy56aXAKYmlNUHJnaVMvc28rZFJVZUtzd0R1R2NrM1BFWGEvYUJZdnZ6UjhaMFRaMDhWYXJVY3VTUFF4RE9CNzVqQVhXSC93clAvQ1ZKelMreC9TK08wbDFmQ3c9PQo=",
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.1/ndd-sql_1.1.1_x64-setup.nsis.zip"
     }
   }
 }
