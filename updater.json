@@ -5,7 +5,7 @@
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1hBQmtnTGpsVXIrWG9EdFJqNTJWM0JuKzlMTE9QcTVEbGtwNzRHei9LbkxmWjFKcjNVYTZ2QzBUK2RLNXpuTGpubkhHRU5aeHNXbG5adEVwVUs1VkFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcyMjE1MDQwCWZpbGU6bmRkLXNxbF8xLjEuNV94NjQtc2V0dXAubnNpcy56aXAKL3czQjQ3ZnoyNWpnNTFra0lBc05zUFVudkZnSGc2NmUxTXpiZ2o2UGlITkd3VDVYdXZNOG1xRVBnNTNYZDRjVVhsTk9lczRUSFF4eVBoNGRBRmNOREE9PQo=",
-      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.4/ndd-sql_1.1.4_x64-setup.nsis.zip"
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.5/ndd-sql_1.1.5_x64-setup.nsis.zip"
     }
   }
 }
