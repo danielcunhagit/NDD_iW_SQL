@@ -7,7 +7,7 @@
   },
   "package": {
     "productName": "ndd-sql",
-    "version": "1.1.2"
+    "version": "1.1.6"
   },
   "tauri": {
     "allowlist": {
@@ -40,7 +40,7 @@
       "endpoints": [
         "https://raw.githubusercontent.com/danielcunhagit/NDD_iW_SQL/main/updater.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFQkNDNTdEOUFGRUUzN0QKUldSOTQvNmFmY1c4M2dsLzVWRElxNldWWVBYajRpQXF2K0lGUm1wMjBjV3ZacHc0aXRIYWY2Z1EK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERENEQ5RUQ4QTg5RDU5NDAKUldSQVdaMm8ySjVOM1JjNkY1dm56WlVZaDlMQTJWLzFXaVYxVk9HMG5RL3NZaEszSWVub0RDMVcK"
     },
     "security": {
       "csp": null

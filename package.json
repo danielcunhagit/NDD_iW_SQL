@@ -1,7 +1,7 @@
 {
   "name": "ndd_sql",
   "private": true,
-  "version": "1.1.2",
+  "version": "1.1.6",
   "type": "module",
   "scripts": {
     "dev": "vite",

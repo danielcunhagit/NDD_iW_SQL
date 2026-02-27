@@ -379,7 +379,32 @@ const MonitoringView = ({
                                 <div style={{flex:1}}><ProCard id="possible_inter" title="Inter" value={data.possible_inter} status="warn" /></div>
                             </div>
                         </div>
-                        <ProCard id="not_possible" title="Não Possível" value={data.not_possible} total={data.not_registered} status="bad" />
+                        {/* --- NOVO CARD: NÃO POSSÍVEL DIVIDIDO --- */}
+                <div 
+                    className="card-clickable expand" 
+                    onClick={() => setActiveDetailFilter('not_possible')} 
+                    style={{display:'flex', flexDirection:'column', gap: 8, padding:'10px', background:'rgba(0,0,0,0.2)', borderRadius:4, borderLeft:'4px solid #EF5350', borderTop:'1px solid #546E7A', borderRight:'1px solid #546E7A', borderBottom:'1px solid #546E7A'}} 
+                    title="Clique para ver as empresas com equipamentos Não Possíveis"
+                >
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom: '1px solid #37474F', paddingBottom: 4}}>
+                        <span style={{fontSize:10, color:'#B0BEC5', fontWeight:'bold'}}>NÃO POSSÍVEL</span>
+                        <span style={{fontSize:16, color:'#fff', fontWeight:'bold'}}>
+                            {fmtMilhar(data.not_possible)} <span style={{fontSize:10, color:'#B0BEC5', fontWeight:'normal'}}>eqp</span>
+                        </span>
+                    </div>
+                    
+                    <div style={{display:'flex', justifyContent:'space-between', gap: 10}}>
+                        <div style={{flex:1, borderLeft:'2px solid #EF5350', paddingLeft: 6}}>
+                            <div style={{fontSize:9, color:'#B0BEC5', fontWeight:'bold'}}>INCOMPATÍVEIS</div>
+                            <div style={{fontSize:13, color:'#fff', fontWeight:'bold'}}>{fmtMilhar(data.not_compatible)}</div>
+                        </div>
+                        <div style={{flex:1, borderLeft:'2px solid #FFD740', paddingLeft: 6}}>
+                            <div style={{fontSize:9, color:'#B0BEC5', fontWeight:'bold'}}>COM RESTRIÇÃO</div>
+                            <div style={{fontSize:13, color:'#fff', fontWeight:'bold'}}>{fmtMilhar(data.not_possible - data.not_compatible)}</div>
+                        </div>
+                    </div>
+                </div>
+                {/* ---------------------------------------- */}
                     </div>
                     <div className="card-group" style={{flexGrow: 0.5, visibility: 'hidden'}}></div>
                 </div>
@@ -961,7 +986,7 @@ const changePanelMonth = (delta: number) => {
             </div>
           )}
           
-          <div className="splash-version">v1.1.2</div>
+          <div className="splash-version">v1.1.6</div>
         </div>
       )}
       {isLoadingData && !isInitialLoad && ( <div className="loading-modal-overlay"> <div className="loading-box"> <div className="loading-spinner"></div> <div className="loading-text">{loadingMsg}</div> </div> </div> )}
@@ -993,7 +1018,7 @@ const changePanelMonth = (delta: number) => {
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
             <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
-                <p className="about-version">Versão 1.1.2</p>
+                <p className="about-version">Versão 1.1.6</p>
                 
                 <div className="about-content">
                     <p style={{textAlign: 'justify', marginBottom: '15px'}}>
