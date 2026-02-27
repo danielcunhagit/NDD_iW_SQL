@@ -1,11 +1,11 @@
 {
-  "version": "v1.1.3",
-  "notes": "Teste de atualização para a versão 1.1.3 bem sucedido!",
+  "version": "v1.1.4",
+  "notes": "Teste de atualização para a versão 1.1.4 bem sucedido!",
   "pub_date": "2026-02-27T14:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM2ZNR0x2OEVpRUZmdTRURDVnaExoMDVxRDhZeXVFaDF1SWwwWmwvWFhobHdCcGJiZklDWWN6NkpuQVRwOTVkdldaZ2VwVkQ1eStFOVF4TTRNYWJiMmdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcyMjEzMTAzCWZpbGU6bmRkLXNxbF8xLjEuM194NjQtc2V0dXAubnNpcy56aXAKRUZRK2p2WFdSSkZOejlQNTc2dXMvZWg0MGJ6d09oTUJzTzBCS2UzTDBLbWlrTDhicU16Nzd6VkhBRzlkdEFlZXZqZnpSakJoRmNHdjQydytCYWJZQlE9PQo=",
-      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.3/ndd-sql_1.1.3_x64-setup.nsis.zip"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1N5TkFmWEFZT3oyd2pPUk42UGQ1bXUwL3FBaHJuVVVGQU1rY01RWEg4VXp0aWdnUVpKcHhOU1Mwa3pZMU1TLzQxYWVUeDVNdkg3ZVNRcDJzaXBTc3dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcyMjE0Mjg3CWZpbGU6bmRkLXNxbF8xLjEuNF94NjQtc2V0dXAubnNpcy56aXAKNnJ0STEwMFVMaytubHA3VzFUc3FkamJBNmdhRm9HbFZUelBKalAzdnB4UzBlTDk1OXYxVUxabkQrVlRXclNQYm1kS2xFTFg3cVFJNnR5QnZ4eTJGQ0E9PQo=",
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.4/ndd-sql_1.1.4_x64-setup.nsis.zip"
     }
   }
 }
