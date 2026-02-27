@@ -961,7 +961,7 @@ const changePanelMonth = (delta: number) => {
             </div>
           )}
           
-          <div className="splash-version">v1.1</div>
+          <div className="splash-version">v1.1.2</div>
         </div>
       )}
       {isLoadingData && !isInitialLoad && ( <div className="loading-modal-overlay"> <div className="loading-box"> <div className="loading-spinner"></div> <div className="loading-text">{loadingMsg}</div> </div> </div> )}
@@ -993,7 +993,7 @@ const changePanelMonth = (delta: number) => {
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
             <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
-                <p className="about-version">Versão 1.1</p>
+                <p className="about-version">Versão 1.1.2</p>
                 
                 <div className="about-content">
                     <p style={{textAlign: 'justify', marginBottom: '15px'}}>
