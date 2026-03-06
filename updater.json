@@ -1,11 +1,11 @@
 {
   "version": "v1.1.7",
-  "notes": "Melhoria visual no painel: Detalhamento inteligente de equipamentos não monitorados (Incompatíveis vs Com Restrição).",
-  "pub_date": "2026-02-27T14:30:00Z",
+  "notes": "🚀 Novidades da versão 1.1.7:\n\n📈 Novo Gráfico de Evolução Semanal Híbrido (Real vs Estimativa).\n⚡ Motor de cache diário para carregamento instantâneo de painéis.\n🎯 Novo alerta inteligente de status de sincronização de dados (D-1).\n🔄 Sincronização em tempo real dos filtros (Empresa, Ano e Fonte) entre todas as abas.\n✨ Diversas melhorias visuais, transições dinâmicas e otimizações de performance.",
+  "pub_date": "2026-03-06T12:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1FZZ3BPRTRVWEcxajkrZFNGUTZkSWZpVXdUQnZwZzFndVlDVWhCWDArS2J5U1lTQU9aMVozNmFTU0pacG81Nkoxd0wzZDhuWksxZlh4T1ZURzA2U3dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcyMjIxMDkzCWZpbGU6bmRkLXNxbF8xLjEuNl94NjQtc2V0dXAubnNpcy56aXAKbERBcm5NSkJoNkdBNHdmZHllaUlsbFZ2Q3RZbitvZzFFaDQxc240eGZ0WkFLbHcvZXJMNEo4dmxvZ3pUVFFLbmVySW8rYk9JTVVPOFhpUTVCZWsxRFE9PQo=",
-      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.6/ndd-sql_1.1.6_x64-setup.nsis.zip"
-    }
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1hsemZIVkZYRkpRY1gzamdvRk0vN0hLdXJQUjdRc1plSDE0SCtaOUlxMUFVWDZkMktkNmlzUXh0aXJudmhkTDZ6U3ZLNC9UVmVFTzYyM0hmM0MwNmc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcyNzk5NjQzCWZpbGU6bmRkLXNxbF8xLjEuN194NjQtc2V0dXAubnNpcy56aXAKVkZMSjVRSWdZTVVGMVEvQWVianJtSmZJYnloQUVTOUFnWFdKb3hOcTgzd2FpUWxQbHo3eGtpL3hFLzQ1ZHdLNGpDRnNKdDBPMHBQSGV4YTJmSHlKQmc9PQo=",
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.7/ndd-sql_1.1.7_x64-setup.nsis.zip"
+    }         
   }
 }
