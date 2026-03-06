@@ -1,9 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import "./App.css";
-import { open } from '@tauri-apps/api/shell';
 import { Info } from "lucide-react";
 
 // --- TYPES (Mantidos) ---
@@ -79,6 +78,7 @@ const MonitoringView = ({
 }) => {
     const [targetStr, setTargetStr] = useState<string>("82.0");
     const [showEvolution, setShowEvolution] = useState(false);
+    const [evolutionOffset, setEvolutionOffset] = useState(0);
     const [activeDetailFilter, setActiveDetailFilter] = useState<keyof MonitoringCompanySummary | null>(null);
 
     // Estados de ordenação da tabela modal
@@ -94,9 +94,11 @@ const MonitoringView = ({
     // O useEffect que fazia o invoke() sumiu daqui, pois o App agora faz isso!
 
     // Lógica da Tabela de Evolução Mensal...
+    // Lógica da Tabela de Evolução Mensal (ATUALIZADA PARA NAVEGAÇÃO)
     const evolutionData = useMemo(() => {
         if (!dashboardData || !dashboardData.communication.length) return null;
         const monthsMap: Record<string, { ndd: number, iw: number, total: number, ano: number, mes: number }> = {};
+        
         dashboardData.communication.forEach(r => {
             const key = `${r.ano}-${String(r.mes).padStart(2, '0')}`;
             if (!monthsMap[key]) monthsMap[key] = { ndd: 0, iw: 0, total: 0, ano: r.ano, mes: r.mes };
@@ -105,13 +107,30 @@ const MonitoringView = ({
             if (r.source === 'IW') monthsMap[key].iw += devCount;
             monthsMap[key].total += devCount;
         });
+        
         const sortedKeys = Object.keys(monthsMap).sort((a, b) => b.localeCompare(a));
-        if (sortedKeys.length < 2) return null; 
-        const curr = monthsMap[sortedKeys[0]]; const prev = monthsMap[sortedKeys[1]];
-        const diffNdd = curr.ndd - prev.ndd; const diffIw = curr.iw - prev.iw; const diffTotal = curr.total - prev.total;
-        const pctNdd = prev.ndd > 0 ? (diffNdd / prev.ndd) * 100 : 0; const pctIw = prev.iw > 0 ? (diffIw / prev.iw) * 100 : 0; const pctTotal = prev.total > 0 ? (diffTotal / prev.total) * 100 : 0;
-        return { curr, prev, diffNdd, diffIw, diffTotal, pctNdd, pctIw, pctTotal };
-    }, [dashboardData]);
+        if (sortedKeys.length < 2) return null; // Precisa de pelo menos 2 meses no banco
+
+        // Garante que a navegação não passe dos limites
+        const maxOffset = sortedKeys.length - 2;
+        const safeOffset = Math.min(evolutionOffset, maxOffset);
+
+        const curr = monthsMap[sortedKeys[safeOffset]];
+        const prev = monthsMap[sortedKeys[safeOffset + 1]];
+        
+        const diffNdd = curr.ndd - prev.ndd; 
+        const diffIw = curr.iw - prev.iw; 
+        const diffTotal = curr.total - prev.total;
+        const pctNdd = prev.ndd > 0 ? (diffNdd / prev.ndd) * 100 : 0; 
+        const pctIw = prev.iw > 0 ? (diffIw / prev.iw) * 100 : 0; 
+        const pctTotal = prev.total > 0 ? (diffTotal / prev.total) * 100 : 0;
+        
+        return { 
+            curr, prev, diffNdd, diffIw, diffTotal, pctNdd, pctIw, pctTotal,
+            canGoBack: safeOffset < maxOffset, // Tem meses mais antigos?
+            canGoForward: safeOffset > 0       // Tem meses mais recentes?
+        };
+    }, [dashboardData, evolutionOffset]);
 
     if (!data) return <div style={{display:'flex', height:'100%', alignItems:'center', justifyContent:'center', color:'#B0BEC5'}}>Carregando diagrama...</div>;
 
@@ -183,12 +202,30 @@ const MonitoringView = ({
     return (
         <div style={{display: 'flex', flexDirection: 'column', height: '100%', width: '100%'}}>
             
-            {/* --- MODAL DA TABELA DE EVOLUÇÃO --- */}
+{/* --- MODAL DA TABELA DE EVOLUÇÃO (COM NAVEGAÇÃO) --- */}
             {showEvolution && evolutionData && (
                 <div className="about-overlay" onClick={() => setShowEvolution(false)}>
                     <div className="about-box" style={{width: '600px', maxWidth: '90%'}} onClick={e => e.stopPropagation()}>
-                        <h2 className="about-title">Evolução de Monitorados</h2>
-                        <p className="about-version">Comparativo do mês corrente vs mês anterior</p>
+                        
+                        {/* Cabeçalho com Botões de Navegação */}
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5}}>
+                            <h2 className="about-title" style={{marginBottom: 0}}>Evolução de Monitorados</h2>
+                            <div className="month-nav" style={{display: 'flex', gap: 10}}>
+                                <button 
+                                    className="nav-btn" 
+                                    disabled={!evolutionData.canGoBack} 
+                                    onClick={() => setEvolutionOffset(prev => prev + 1)} 
+                                    title="Comparar com meses mais antigos"
+                                >{'<'}</button>
+                                <button 
+                                    className="nav-btn" 
+                                    disabled={!evolutionData.canGoForward} 
+                                    onClick={() => setEvolutionOffset(prev => prev - 1)} 
+                                    title="Avançar para meses recentes"
+                                >{'>'}</button>
+                            </div>
+                        </div>
+                        <p className="about-version" style={{marginTop: 0, marginBottom: 15}}>Comparativo do mês selecionado vs mês anterior</p>
                         
                         <table className="evolution-table">
                             <thead>
@@ -314,7 +351,7 @@ const MonitoringView = ({
 
                     <div 
                         className="card-clickable"
-                        onClick={() => { if(evolutionData) setShowEvolution(true); }}
+                        onClick={() => { setEvolutionOffset(0); if(evolutionData) setShowEvolution(true); }}
                         style={{display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.2)', padding: '10px 15px', borderRadius: '6px', border: '1px solid #455A64', cursor: evolutionData ? 'pointer' : 'default', position: 'relative'}}
                         title={evolutionData ? "Clique para ver a evolução mês a mês" : "Dados insuficientes para evolução"}
                     >
@@ -532,7 +569,131 @@ const DefaultTooltip = ({ active, payload, label, view, selectedYear }: any) => 
     return null; 
 };
 
+const RenderVerticalLineLabel = (props: any) => {
+    const { viewBox, weeklySource, nddDate, iwDate } = props;
+    const x = viewBox.x; const y = viewBox.y + 20;
+
+    if (weeklySource === "Consolidado") {
+        return (
+            <g>
+                <text x={x + 8} y={y} fill="#B0BEC5" fontSize={10} fontWeight="bold">Atualização:</text>
+                <text x={x + 8} y={y + 14} fill="#B0BEC5" fontSize={10}>NDD: {nddDate}</text>
+                <text x={x + 8} y={y + 28} fill="#B0BEC5" fontSize={10}>iW: {iwDate}</text>
+            </g>
+        );
+    }
+    return <text x={x + 8} y={y} fill="#B0BEC5" fontSize={10} fontWeight="bold">Atualização: {weeklySource === "NDD" ? nddDate : iwDate}</text>;
+};
+
+const RenderWeeklyLabel = (props: any) => {
+    const { x, y, value, index, sundays, lineKey, color, currentDay, isCurrentOngoingMonth, totalDiasMes } = props;
+    const dia = index + 1;
+
+    if (value == null) return null;
+
+    // A CAIXINHA DE PRODUÇÃO FINAL NO ÚLTIMO DIA DO MÊS (Para todas as situações)
+    if (dia === totalDiasMes) {
+        let drawBox = false;
+        
+        // 1. Desenha para a linha do mês anterior (Cinza)
+        if (lineKey === 'real_prev') drawBox = true;
+        // 2. Desenha para a linha do mês atual SE o mês já estiver fechado/passado (Azul)
+        if (lineKey === 'real_curr' && !isCurrentOngoingMonth) drawBox = true;
+        // 3. Desenha para a linha de estimativa SE o mês estiver em andamento (Amarela)
+        if (lineKey === 'est_curr' && isCurrentOngoingMonth) drawBox = true;
+
+        if (drawBox) {
+            return (
+                <g style={{ filter: 'drop-shadow(2px 2px 3px rgba(0,0,0,0.5))' }}>
+                    {/* A cor da borda e do texto herda dinamicamente a cor da respectiva linha */}
+                    <rect x={x - 35} y={y - 32} width={70} height={20} fill="#263238" stroke={color} strokeWidth={1.5} rx={4} ry={4} />
+                    <text x={x} y={y - 18} fill={color} textAnchor="middle" fontSize={11} fontWeight="bold">
+                        {fmtMilhar(value)}
+                    </text>
+                </g>
+            );
+        }
+    }
+
+    // Rótulos normais dos domingos
+    if (!sundays || !sundays.includes(dia)) return null;
+    if (lineKey === 'est_curr' && dia <= currentDay) return null;
+
+    return (
+        <text x={x} y={y - 12} fill={color} textAnchor="middle" fontSize={11} fontWeight="bold" style={{ textShadow: '1px 1px 3px rgba(0,0,0,0.8), -1px -1px 3px rgba(0,0,0,0.8)' }}>
+            {(Number(value) / 1000000).toFixed(1)}M
+        </text>
+    );
+};
+
+const RenderCustomDot = (props: any) => {
+    const { cx, cy, stroke, index, sundays } = props;
+    const dia = index + 1;
+    if (!sundays || !sundays.includes(dia)) return null;
+    return <circle cx={cx} cy={cy} r={4} fill={stroke} stroke="#263238" strokeWidth={2} />;
+};
+
 const ComparisonTooltip = ({ active, payload, label, selectedYear, lastUpdateDate }: any) => { if (active && payload && payload.length >= 2) { const prevData = payload.find((p: any) => p.dataKey === "prev_total"); const currData = payload.find((p: any) => p.dataKey === "curr_total"); if (!prevData || !currData) return null; const d = payload[0].payload; const prevVal = prevData.value; const currVal = currData.value; let dbDay = 0; let dbMonth = 0; let dbYear = 0; if (lastUpdateDate && lastUpdateDate !== "N/D") { const parts = lastUpdateDate.split('-'); if(parts.length === 3) { dbYear = parseInt(parts[0]); dbMonth = parseInt(parts[1]); dbDay = parseInt(parts[2]); } } const monthIndex = MESES.indexOf(label); const isCurrentMonthInDb = (selectedYear === dbYear) && (monthIndex === dbMonth); const isFutureMonth = (selectedYear === dbYear) && (monthIndex > dbMonth); let currentLabelText = `${currData.name}`; if (isCurrentMonthInDb && dbDay > 0) { currentLabelText = `Prod. até ${dbDay.toString().padStart(2, '0')}/${dbMonth.toString().padStart(2, '0')}`; } let diffDisplay = <></>; let estimateRow = <></>; if (prevVal > 0) { if (currVal === 0 && isFutureMonth) { diffDisplay = <span style={{color: '#90A4AE', fontStyle: 'italic', fontSize: 11}}>Aguardando dados...</span>; } else { let valToCompare = currVal; let isEstComparison = false; if (isCurrentMonthInDb && d.total_proj > currVal) { valToCompare = d.total_proj; isEstComparison = true; estimateRow = ( <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 11 }}> <span style={{color: '#FFD740', fontStyle: 'italic'}}>Produção estimada:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(d.total_proj)}</span> </div> ); } const diffPct = ((valToCompare - prevVal) / prevVal) * 100; let colorDiff = "#B0BEC5"; let diffText = "Estável"; if (diffPct > 0) { diffText = "Aumento"; colorDiff = "#00E676"; } else if (diffPct < 0) { diffText = "Diminuição"; colorDiff = "#EF5350"; } let diffSuffix = isEstComparison ? " (Est.)" : ""; diffDisplay = <span style={{color: colorDiff}}>{diffText}{diffSuffix} {Math.abs(diffPct).toFixed(2)}%</span>; } } else if (currVal > 0) { diffDisplay = <span style={{color: "#00E676"}}>Novo (100.00%)</span>; } return ( <div style={{ background: '#263238', border: '1px solid #546E7A', padding: '12px', borderRadius: '6px', minWidth: 180, zIndex: 100 }}> <p style={{ fontWeight: 'bold', color: 'white', marginBottom: 8, fontSize: 13, textAlign: 'center', borderBottom: '1px solid #455A64', paddingBottom: 4 }}>{label}</p> <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}> <span style={{color: '#90A4AE'}}>{prevData.name}:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(prevVal)}</span> </div> <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}> <span style={{color: '#00E5FF'}}>{currentLabelText}:</span> <span style={{color: '#fff', fontWeight: 'bold'}}>{fmtMilhar(currVal)}</span> </div> {estimateRow} <div style={{ borderTop: '1px solid #455A64', paddingTop: 6, textAlign: 'center', fontSize: 13, fontWeight: 'bold' }}>{diffDisplay}</div> </div> ); } return null; };
+
+const WeeklyEvolutionTooltip = ({ active, payload, label, weeklyData, isCurrentOngoingMonth }: any) => { 
+    if (active && payload && payload.length) { 
+        const prevData = payload.find((p: any) => p.dataKey === "real_prev"); 
+        const currDataReal = payload.find((p: any) => p.dataKey === "real_curr"); 
+        const currDataEst = payload.find((p: any) => p.dataKey === "est_curr"); 
+
+        const prevVal = prevData ? prevData.value : null; 
+        let currVal = null; 
+        let currLabel = ""; 
+        let currColor = "";
+
+        if (currDataReal && currDataReal.value != null) { 
+            currVal = currDataReal.value; 
+            currLabel = isCurrentOngoingMonth ? `Real ${weeklyData.mesAtualNome}` : `Acumulado Real ${weeklyData.mesAtualNome}`; 
+            currColor = "#00E5FF";
+        } else if (currDataEst && currDataEst.value != null) { 
+            currVal = currDataEst.value; 
+            currLabel = `Estimativa ${weeklyData.mesAtualNome}`; 
+            currColor = "#FFD740";
+        } 
+
+        let diffDisplay = <></>; 
+        if (prevVal > 0 && currVal !== null) { 
+            const diffPct = ((currVal - prevVal) / prevVal) * 100; 
+            let colorDiff = "#B0BEC5"; 
+            let diffText = "Estável"; 
+            if (diffPct > 0) { diffText = "Crescimento"; colorDiff = "#00E676"; } 
+            else if (diffPct < 0) { diffText = "Redução"; colorDiff = "#EF5350"; } 
+            
+            diffDisplay = (
+                <div style={{ borderTop: '1px solid #455A64', paddingTop: 6, marginTop: 6, textAlign: 'center', fontSize: 12, fontWeight: 'bold' }}>
+                    <span style={{color: colorDiff}}>{diffText}: {diffPct > 0 ? '+' : ''}{diffPct.toFixed(2)}%</span>
+                </div>
+            );
+        } 
+
+        return ( 
+            <div style={{ background: '#263238', border: '1px solid #546E7A', padding: '12px', borderRadius: '6px', minWidth: 190, zIndex: 100, boxShadow: '0px 4px 10px rgba(0,0,0,0.5)' }}> 
+                <p style={{ fontWeight: 'bold', color: 'white', marginBottom: 8, fontSize: 13, textAlign: 'center', borderBottom: '1px solid #455A64', paddingBottom: 4 }}>Dia {label} do mês</p> 
+                
+                {currVal !== null && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}> 
+                        <span style={{color: currColor}}>{currLabel}:</span> 
+                        <span style={{color: '#fff', fontWeight: 'bold', marginLeft: 15}}>{fmtMilhar(currVal)}</span> 
+                    </div>
+                )}
+                {prevVal !== null && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}> 
+                        <span style={{color: '#90A4AE'}}>Acumulado Real {weeklyData.mesAntNome}:</span> 
+                        <span style={{color: '#fff', fontWeight: 'bold', marginLeft: 15}}>{fmtMilhar(prevVal)}</span> 
+                    </div>
+                )}
+                
+                {diffDisplay} 
+            </div> 
+        ); 
+    } 
+    return null; 
+};
 
 function App() {
   const [showAbout, setShowAbout] = useState(false);
@@ -553,8 +714,26 @@ function App() {
   const [bgLoading, setBgLoading] = useState(false);
   const [areCompaniesReady, setAreCompaniesReady] = useState(false);
   const [toast, setToast] = useState<ToastMsg>({ message: '', type: 'info', visible: false });
+  const [showDataWarning, setShowDataWarning] = useState(false);
+  const [outdatedText, setOutdatedText] = useState("");
+  const [syncDates, setSyncDates] = useState({ targetISO: '', nddISO: '', iwISO: '', targetBR: '', nddBR: '', iwBR: '' });
   const [companyList, setCompanyList] = useState<string[]>([]);
   const [currentView, setCurrentView] = useState<ViewType>('production_current');  
+  
+  // ---> LÓGICA DE "O QUE HÁ DE NOVO" <---
+  const APP_VERSION = "1.1.7"; // Mude isso no futuro para disparar a janela de novo!
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+
+  useEffect(() => {
+      // Só verifica depois que o splash screen terminar de carregar
+      if (!isInitialLoad) {
+          const lastSeenVersion = localStorage.getItem('last_seen_version');
+          if (lastSeenVersion !== APP_VERSION) {
+              setShowWhatsNew(true);
+              localStorage.setItem('last_seen_version', APP_VERSION);
+          }
+      }
+  }, [isInitialLoad]);
         useEffect(() => {
             if (currentView === 'communication') {
                 setShowGoalLine(false);
@@ -578,6 +757,7 @@ function App() {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'total', direction: 'desc' });
   const [panelCache, setPanelCache] = useState<Record<string, any[]>>({});
   const fetchedKeys = useRef<Set<string>>(new Set());
+  const dailyRawCache = useRef<Record<string, any[]>>({}); // Cache super rápido para o gráfico de linhas
 
 // --- PRÉ-CARREGAMENTO E LOGS APRIMORADOS ---
   useEffect(() => {
@@ -597,47 +777,84 @@ function App() {
       let isCancelled = false;
 
       const prefetchAll = async () => {
-          const isGeneralView = !selectedCompany;
-          const command = isGeneralView ? "fetch_month_summary_cmd" : "fetch_month_details_cmd";
-          let fetchCount = 0;
+              const isGeneralView = !selectedCompany;
+              let fetchCount = 0;
 
-          for (const month of monthsToFetch) {
-              if (isCancelled) break;
+              // ---> 1. PRIORIDADE MÁXIMA: DADOS DIÁRIOS PARA A JANELA DE PREVISÕES <---
+              // Descobre o mês e ano alvo baseado na última leitura real do banco
+              const today = new Date();
+              let dbDate = today;
+              if (data?.last_update_ndd && data.last_update_ndd !== "N/D") {
+                  const parts = data.last_update_ndd.split('-');
+                  if (parts.length === 3) {
+                      dbDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                  }
+              }
+              
+              let topMonth = dbDate.getMonth() + 1;
+              let topYear = dbDate.getFullYear();
+              let prevTopMonth = topMonth - 1;
+              let prevTopYear = topYear;
+              if (prevTopMonth < 1) { prevTopMonth = 12; prevTopYear -= 1; }
 
-              const cacheKey = `${year}-${selectedCompany || 'GERAL'}-${month}`;
-              if (fetchedKeys.current.has(cacheKey) || panelCache[cacheKey]) continue;
-
-              fetchedKeys.current.add(cacheKey);
-              try {
-                  // Atualiza o rodapé em tempo real avisando qual mês está sendo baixado silenciosamente
-                  setStatusText(`Baixando dados em 2º plano: ${MESES[month]}/${year}...`);
+              setStatusText(`Preparando motor de previsões...`);
+              const sources = ["Consolidado", "NDD", "iW"];
+              
+              // Baixa os dados diários essenciais instantaneamente
+              for (const src of sources) {
+                  if (isCancelled) break;
+                  const currKey = `${topYear}-${topMonth}-${src}-${selectedCompany || 'GERAL'}`;
+                  const prevKey = `${prevTopYear}-${prevTopMonth}-${src}-${selectedCompany || 'GERAL'}`;
                   
-                  const args: any = { year, month };
-                  if (!isGeneralView) args.company = selectedCompany;
+                  const fetches = [];
+                  if (!dailyRawCache.current[currKey]) {
+                      const argsCurr: any = { year: topYear, month: topMonth, source: src };
+                      if (!isGeneralView) argsCurr.company = selectedCompany;
+                      fetches.push(invoke<any[]>("fetch_daily_production", argsCurr).then(res => dailyRawCache.current[currKey] = res));
+                  }
+                  if (!dailyRawCache.current[prevKey]) {
+                      const argsPrev: any = { year: prevTopYear, month: prevTopMonth, source: src };
+                      if (!isGeneralView) argsPrev.company = selectedCompany;
+                      fetches.push(invoke<any[]>("fetch_daily_production", argsPrev).then(res => dailyRawCache.current[prevKey] = res));
+                  }
+                  try { await Promise.all(fetches); } catch(e) {}
+              }
 
-                  const res = await invoke<any[]>(command, args);
+              // ---> 2. PRIORIDADE SECUNDÁRIA: SIDE PANEL (Apenas os 2 meses mais recentes) <---
+              const panelCommand = isGeneralView ? "fetch_month_summary_cmd" : "fetch_month_details_cmd";
+              const monthsForPanel = monthsToFetch.slice(0, 2); // Corta a lista para reter apenas os 2 primeiros!
+
+              for (const month of monthsForPanel) {
                   if (isCancelled) break;
 
-                  setPanelCache(prev => ({ ...prev, [cacheKey]: res }));
-                  fetchCount++;
+                  const cacheKey = `${year}-${selectedCompany || 'GERAL'}-${month}`;
+                  if (fetchedKeys.current.has(cacheKey) || panelCache[cacheKey]) continue;
 
-                  // Dá um respiro para não travar a interface
-                  await new Promise(r => setTimeout(r, 400));
-              } catch (err) {
-                  fetchedKeys.current.delete(cacheKey);
+                  fetchedKeys.current.add(cacheKey);
+                  try {
+                      setStatusText(`Baixando painel lateral: ${MESES[month]}/${year}...`);
+                      const args: any = { year, month };
+                      if (!isGeneralView) args.company = selectedCompany;
+
+                      const res = await invoke<any[]>(panelCommand, args);
+                      if (isCancelled) break;
+
+                      setPanelCache(prev => ({ ...prev, [cacheKey]: res }));
+                      fetchCount++;
+                      
+                      // Dá um respiro super rápido para não travar a interface
+                      await new Promise(r => setTimeout(r, 100));
+                  } catch (err) {
+                      fetchedKeys.current.delete(cacheKey);
+                  }
               }
-          }
 
-          // Quando terminar de baixar tudo, avisa que está pronto
-          if (!isCancelled) {
-              if (fetchCount > 0) {
-                  setStatusText(`Pronto! ${fetchCount} meses armazenados em cache rápido.`);
+              // Quando terminar de baixar tudo, avisa que está pronto
+              if (!isCancelled) {
+                  setStatusText(`Pronto! Gráficos em cache.`);
                   setTimeout(() => { if (!isCancelled) setStatusText(`Visualizando: ${year} | ${source}`); }, 4000);
-              } else {
-                  setStatusText(`Visualizando: ${year} | ${source}`);
               }
-          }
-      };
+          };
 
       prefetchAll();
       return () => { isCancelled = true; };
@@ -677,56 +894,93 @@ function App() {
     }, [data]);
 
   useEffect(() => {
-    if (didInit.current) return;
-    didInit.current = true;
     let unlisten: any; let unlistenMonitor: any; let unlistenLoading: any; let unlistenCompanies: any;
-    const startSystem = async () => {
-        try {
-            unlisten = await listen("splash-status", (event: any) => { setSplashStatus(event.payload as string); setSplashProgress(prev => Math.min(prev + 10, 95)); });
-            unlistenMonitor = await listen("monitoring-status", (event: any) => { setStatusText(event.payload as string); });
-            unlistenLoading = await listen("loading-status", (event: any) => { setStatusText(event.payload as string); });
-            unlistenCompanies = await listen("companies-ready", () => {
-                console.log(">>> Evento companies-ready recebido!"); // Debug
-                setAreCompaniesReady(true);
-                // Busca a lista imediatamente
-                invoke<string[]>("fetch_companies", { year: new Date().getFullYear() })
-                    .then((list) => {
-                        setCompanyList(list);
-                        setStatusText("Lista de empresas atualizada.");
-                        // Força o fim de qualquer loading residual se necessário
-                        setBgLoading(false); 
-                    })
-                    .catch(err => console.error("Erro ao buscar empresas:", err));
+    
+    // 1. REGISTRA OS OUVINTES SEMPRE (Resolve o bloqueio do React 18)
+    const setupListeners = async () => {
+        unlisten = await listen("splash-status", (event: any) => { setSplashStatus(event.payload as string); setSplashProgress(prev => Math.min(prev + 10, 95)); });
+        unlistenMonitor = await listen("monitoring-status", (event: any) => { setStatusText(event.payload as string); });
+        unlistenLoading = await listen("loading-status", (event: any) => { setStatusText(event.payload as string); });
+        unlistenCompanies = await listen("companies-ready", () => {
+            setAreCompaniesReady(true);
+            invoke<string[]>("fetch_companies", { year: new Date().getFullYear() })
+                .then((list) => {
+                    setCompanyList(list);
+                    setStatusText("Lista de empresas atualizada.");
+                    setBgLoading(false); 
+                    showToast("Filtro de empresas pronto para uso.", "success");
+                })
+                .catch(console.error);
+        });
+    };
+    setupListeners();
+
+    // 2. A CARGA PESADA SÓ RODA UMA VEZ
+    if (!didInit.current) {
+        didInit.current = true;
+        const startSystem = async () => {
+            try {
+                const initialData = await invoke<DashboardData>("perform_initial_load");
+            setSplashProgress(100); setSplashStatus("Carregado."); setData(initialData); setConsolidatedData(initialData); setStatusText("Consolidado.");
+
+            await invoke("finalize_startup"); setTimeout(() => { setIsInitialLoad(false); }, 300);
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yyyy = yesterday.getFullYear();
+            const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+            const dd = String(yesterday.getDate()).padStart(2, '0');
+            const targetDateStr = `${yyyy}-${mm}-${dd}`; // Formato: 2026-03-01
+
+            let outdated = [];
+            if (initialData.last_update_ndd && initialData.last_update_ndd !== "N/D" && initialData.last_update_ndd < targetDateStr) outdated.push("NDD Print");
+            if (initialData.last_update_iw && initialData.last_update_iw !== "N/D" && initialData.last_update_iw < targetDateStr) outdated.push("iW Remote");
+            
+            // Salva as datas formatadas para usar na tabela verde/vermelha do Modal
+            setSyncDates({
+                targetISO: targetDateStr,
+                nddISO: initialData.last_update_ndd || "N/D",
+                iwISO: initialData.last_update_iw || "N/D",
+                targetBR: `${dd}/${mm}/${yyyy}`,
+                nddBR: formatDate(initialData.last_update_ndd),
+                iwBR: formatDate(initialData.last_update_iw)
             });
 
-            const initialData = await invoke<DashboardData>("perform_initial_load");
-            setSplashProgress(100); setSplashStatus("Carregado."); setData(initialData); setConsolidatedData(initialData); setStatusText("Consolidado.");
-            await invoke("finalize_startup"); setTimeout(() => { setIsInitialLoad(false); }, 300);
-
+            if (outdated.length > 0) {
+                setOutdatedText(outdated.join(" e o "));
+                setShowDataWarning(true);
+            }
             const currY = new Date().getFullYear();
             showToast(`Dados de ${currY} prontos.`, 'info');
             setBgLoading(true); setStatusText("Atualizando histórico antigo...");
             
-            invoke<DashboardData>("fetch_full_history").then(historyData => {
+                invoke<DashboardData>("fetch_full_history").then(historyData => {
                 setData(prev => { if (!prev) return historyData; return { ...prev, production: [...prev.production, ...historyData.production], communication: [...prev.communication, ...historyData.communication] }; });
                 setConsolidatedData(prev => { if (!prev) return historyData; return { ...prev, production: [...prev.production, ...historyData.production], communication: [...prev.communication, ...historyData.communication] }; });
                 setStatusText("Histórico completo."); setBgLoading(false);
+                
+                // ---> MELHORIA 3: Alerta de Histórico Pronto
+                showToast("Histórico completo de todos os anos disponível.", "success");
             }).catch(console.error);
+
             invoke<MonitoringData>("fetch_monitoring_data").then(res => {
-    setMonitoringData(res);
-    
-    // Assim que terminar o diagrama, começa a baixar a tabela pesada silenciosamente
-    setIsLoadingSummaries(true);
-    invoke<MonitoringCompanySummary[]>("fetch_monitoring_company_summary")
-        .then(summaries => {
-            setCompanySummaries(summaries);
-            setIsLoadingSummaries(false);
-        })
-        .catch(err => {
-            console.error("Erro ao pré-carregar tabela de empresas:", err);
-            setIsLoadingSummaries(false);
-        });
-});
+                setMonitoringData(res);
+                
+                // Assim que terminar o diagrama, começa a baixar a tabela pesada silenciosamente
+                setIsLoadingSummaries(true);
+                invoke<MonitoringCompanySummary[]>("fetch_monitoring_company_summary")
+                    .then(summaries => {
+                        setCompanySummaries(summaries);
+                        setIsLoadingSummaries(false);
+                        
+                        // ---> MELHORIA 3: Alerta da Aba de Monitoramento Pronta
+                        showToast("Aba de Monitoramento e Oportunidades pronta.", "success");
+                    })
+                    .catch(err => {
+                        console.error("Erro ao pré-carregar tabela de empresas:", err);
+                        setIsLoadingSummaries(false);
+                    });
+            });
         } catch (err) { 
             console.error("ERRO CRÍTICO:", err); 
             // ALTERAÇÃO AQUI: Mensagem fixa em vez de 'String(err)'
@@ -734,8 +988,10 @@ function App() {
         }
     };
     startSystem();
-    return () => { if(unlisten) unlisten(); if(unlistenMonitor) unlistenMonitor(); if(unlistenLoading) unlistenLoading(); if(unlistenCompanies) unlistenCompanies(); };
-  }, []);
+  } // <--- ADICIONE ESTA CHAVE AQUI PARA FECHAR O IF!
+  
+  return () => { if(unlisten) unlisten(); if(unlistenMonitor) unlistenMonitor(); if(unlistenLoading) unlistenLoading(); if(unlistenCompanies) unlistenCompanies(); };
+}, []);
 
   useEffect(() => { if(!isInitialLoad && areCompaniesReady) { invoke<string[]>("fetch_companies", { year: year }).then(setCompanyList); } }, [year, areCompaniesReady, isInitialLoad]);
 
@@ -952,6 +1208,141 @@ const changePanelMonth = (delta: number) => {
   const footerStats = useMemo(() => { if (!data) return { companies: 0, equipments: 0 }; if (selectedCompany) { return { companies: 1, equipments: data.total_equipments }; } if (currentView === 'monitoring' && monitoringData) { return { companies: data.total_companies, equipments: monitoringData.mif }; } const maxEquipments = chartData.reduce((max, curr) => { const devs = currentView.startsWith('production') ? curr.devices : curr.total_devs; return devs > max ? devs : max; }, 0); return { companies: companyList.length, equipments: maxEquipments }; }, [data, monitoringData, currentView, chartData, companyList, selectedCompany]);
   const formatYAxis = (val: number) => currentView === 'communication' ? `${(val * 100).toFixed(0)}%` : `${(val/1000000).toFixed(1)}M`;
 
+  const activeContext = useMemo(() => {
+      if (currentView === 'monitoring') return "Painel: Monitoramento (MIF)";
+      const aba = currentView === 'communication' ? "Comunicação" : currentView === 'production_compare' ? "Ano a Ano" : "Produção";
+      const visao = selectedCompany ? `Empresa: ${selectedCompany}` : "Visão Consolidada";
+      const fonteInfo = source !== "Consolidado" ? ` [${source}]` : "";
+      return `Visualizando: ${aba} ➔ ${visao} (${year})${fonteInfo}`;
+  }, [currentView, selectedCompany, year, source]);
+
+  // Limpa logs estáticos após 6 segundos para manter o rodapé limpo, mantendo apenas o contexto azul
+  useEffect(() => {
+      const isStaticLog = statusText && 
+                          !bgLoading && 
+                          !statusText.includes("Baixando") && 
+                          !statusText.includes("Filtrando") && 
+                          !statusText.includes("Verificando");
+                          
+      if (isStaticLog) {
+          const timer = setTimeout(() => setStatusText(""), 6000);
+          return () => clearTimeout(timer);
+      }
+  }, [statusText, bgLoading]);
+
+// ---> INÍCIO DA NOVA FUNCIONALIDADE: COMPARATIVO SEMANAL REAL E HÍBRIDO
+  const [showWeeklyModal, setShowWeeklyModal] = useState(false);
+  const [weeklyOffset, setWeeklyOffset] = useState(0); 
+  const [weeklyData, setWeeklyData] = useState<any>(null);
+  const [isWeeklyLoading, setIsWeeklyLoading] = useState(false);
+
+  useEffect(() => {
+      if (!showWeeklyModal || currentView !== 'production_current') return;
+
+      let isCancelled = false;
+      setIsWeeklyLoading(true);
+
+      const fetchRealWeeklyData = async () => {
+          const today = new Date();
+          let dbDate = today;
+          let diasComProducaoReal = today.getDate() - 1;
+
+          if (data?.last_update_ndd && data.last_update_ndd !== "N/D") {
+              const parts = data.last_update_ndd.split('-');
+              if (parts.length === 3) {
+                  dbDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                  diasComProducaoReal = parseInt(parts[2]);
+              }
+          }
+
+          // INTEGRAÇÃO COM O ANO GLOBAL DO FILTRO
+          let baseYear = dbDate.getFullYear();
+          let baseMonth = dbDate.getMonth() + 1;
+          
+          if (year !== baseYear) {
+              baseYear = year;
+              baseMonth = 12; // Se o ano for diferente, começa explorando dezembro de trás pra frente
+          }
+
+          let targetMonth = baseMonth - weeklyOffset;
+          let targetYear = baseYear;
+          while (targetMonth < 1) { targetMonth += 12; targetYear -= 1; }
+          let prevMonth = targetMonth - 1; let prevYear = targetYear;
+          if (prevMonth < 1) { prevMonth = 12; prevYear -= 1; }
+
+          const currKey = `${targetYear}-${targetMonth}-${source}-${selectedCompany || 'GERAL'}`;
+          const prevKey = `${prevYear}-${prevMonth}-${source}-${selectedCompany || 'GERAL'}`;
+
+          let currDaily = dailyRawCache.current[currKey];
+          let prevDaily = dailyRawCache.current[prevKey];
+
+          if (!currDaily || !prevDaily) {
+              setIsWeeklyLoading(true);
+              const argsCurr: any = { year: targetYear, month: targetMonth, source: source };
+              const argsPrev: any = { year: prevYear, month: prevMonth, source: source };
+              if (selectedCompany) { argsCurr.company = selectedCompany; argsPrev.company = selectedCompany; }
+              try {
+                  if (!currDaily) currDaily = await invoke("fetch_daily_production", argsCurr);
+                  if (!prevDaily) prevDaily = await invoke("fetch_daily_production", argsPrev);
+                  dailyRawCache.current[currKey] = currDaily;
+                  dailyRawCache.current[prevKey] = prevDaily;
+              } catch (e) { console.error("Erro banco:", e); }
+          }
+          
+          if (isCancelled) return;
+
+          const totalDiasMes = new Date(targetYear, targetMonth, 0).getDate();
+          const sundays = [];
+          for(let d = 1; d <= totalDiasMes; d++) {
+              if (new Date(targetYear, targetMonth - 1, d).getDay() === 0) sundays.push(d);
+          }
+
+          // A MÁGICA: Só tem estimativa (Tracejado) se o mês analisado for EXATAMENTE o mês inacabado do banco de dados!
+          const isCurrentOngoingMonth = (targetYear === dbDate.getFullYear() && targetMonth === (dbDate.getMonth() + 1));
+          const diasRealParaEsteMes = isCurrentOngoingMonth ? diasComProducaoReal : totalDiasMes;
+
+          const totalProduzidoAteHoje = (currDaily || []).filter(d => d.dia <= diasRealParaEsteMes).reduce((a, b) => a + b.total, 0);
+
+          let incDiario = 0;
+          if (isCurrentOngoingMonth && data && data.projection) {
+              let targetProj = 0; 
+              if (source === "Consolidado") { targetProj = data.projection.ndd_pb + data.projection.iw_pb + data.projection.ndd_cor + data.projection.iw_cor; }
+              else if (source === "NDD") { targetProj = data.projection.ndd_pb + data.projection.ndd_cor; }
+              else if (source === "iW") { targetProj = data.projection.iw_pb + data.projection.iw_cor; }
+
+              if (targetProj > totalProduzidoAteHoje && totalDiasMes > diasRealParaEsteMes) {
+                  incDiario = (targetProj - totalProduzidoAteHoje) / (totalDiasMes - diasRealParaEsteMes);
+              }
+          }
+
+          const points = [];
+          let acumuladoPrev = 0;
+          let acumuladoCurr = 0;
+
+          for (let d = 1; d <= totalDiasMes; d++) {
+              acumuladoPrev += prevDaily?.find(x => x.dia === d)?.total || 0;
+              let cReal = null; let cEst = null;
+
+              if (d <= diasRealParaEsteMes) {
+                  acumuladoCurr += currDaily?.find(x => x.dia === d)?.total || 0;
+                  cReal = acumuladoCurr;
+                  if (isCurrentOngoingMonth && d === diasRealParaEsteMes) cEst = acumuladoCurr;
+              } else if (isCurrentOngoingMonth) {
+                  cEst = Math.round(totalProduzidoAteHoje + (incDiario * (d - diasRealParaEsteMes)));
+              }
+
+              points.push({ dia: d, real_prev: acumuladoPrev > 0 ? acumuladoPrev : null, real_curr: cReal, est_curr: cEst });
+          }
+
+          setWeeklyData({ mesAtualNome: MESES[targetMonth], mesAntNome: MESES[prevMonth], points, sundays, diasRealParaEsteMes, totalDiasMes, isCurrentOngoingMonth });
+          setIsWeeklyLoading(false);
+      };
+
+      fetchRealWeeklyData();
+      return () => { isCancelled = true; };
+  }, [showWeeklyModal, weeklyOffset, source, selectedCompany, data, year]);
+  // <--- FIM DA NOVA FUNCIONALIDADE
+
   return (
     <>
 {isInitialLoad && (
@@ -986,7 +1377,7 @@ const changePanelMonth = (delta: number) => {
             </div>
           )}
           
-          <div className="splash-version">v1.1.6</div>
+          <div className="splash-version">v1.1.7</div>
         </div>
       )}
       {isLoadingData && !isInitialLoad && ( <div className="loading-modal-overlay"> <div className="loading-box"> <div className="loading-spinner"></div> <div className="loading-text">{loadingMsg}</div> </div> </div> )}
@@ -1013,12 +1404,98 @@ const changePanelMonth = (delta: number) => {
         </div>
       )}
 
-{/* --- MODAL SOBRE (ABOUT) --- */}
+      {/* --- MODAL DE AVISO DE DADOS DESATUALIZADOS --- */}
+      {showDataWarning && (
+        <div className="about-overlay" onClick={() => setShowDataWarning(false)} style={{ zIndex: 9999 }}>
+            <div className="about-box" style={{ width: '480px', borderTop: '4px solid #FFD740' }} onClick={e => e.stopPropagation()}>
+                <h2 className="about-title" style={{ color: '#FFD740' }}>Aviso de Sincronização</h2>
+
+                <div className="about-content">
+                    <p style={{ textAlign: 'justify', marginBottom: '15px' }}>
+                        Identificamos que os dados de origem do <strong>{outdatedText}</strong> ainda não foram atualizados com as informações mais recentes.
+                    </p>
+
+                    {/* TABELA DE COMPARAÇÃO DE DATAS */}
+                    <div style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid #455A64', borderRadius: '6px', padding: '15px', marginBottom: '15px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid #37474F', paddingBottom: '4px' }}>
+                            <span style={{ color: '#B0BEC5', fontWeight: 'bold' }}>Data Esperada (D-1):</span>
+                            <span style={{ color: '#fff', fontWeight: 'bold' }}>{syncDates.targetBR}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <span style={{ color: '#B0BEC5' }}>Última Atualização NDD:</span>
+                            <span style={{ color: syncDates.nddISO !== "N/D" && syncDates.nddISO >= syncDates.targetISO ? '#00E676' : '#EF5350', fontWeight: 'bold' }}>
+                                {syncDates.nddBR}
+                            </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#B0BEC5' }}>Última Atualização iW:</span>
+                            <span style={{ color: syncDates.iwISO !== "N/D" && syncDates.iwISO >= syncDates.targetISO ? '#00E676' : '#EF5350', fontWeight: 'bold' }}>
+                                {syncDates.iwBR}
+                            </span>
+                        </div>
+                    </div>
+
+                    <p style={{ textAlign: 'justify', marginBottom: '15px' }}>
+                        Fique tranquilo! O painel continuará funcionando normalmente. As <strong>estimativas matemáticas e projeções continuam corretas</strong> com base no volume de dados que já se encontra consolidado no sistema.
+                    </p>
+                </div>
+
+                <button 
+                    className="btn-close-about" 
+                    onClick={() => setShowDataWarning(false)} 
+                    style={{ background: 'transparent', color: '#FFD740', border: '1px solid #FFD740', fontWeight: 'bold', transition: 'all 0.2s ease', marginTop: '10px' }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = '#FFD740'; e.currentTarget.style.color = '#000'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#FFD740'; }}
+                >
+                    Estou Ciente
+                </button>
+            </div>
+        </div>
+      )}
+
+      {/* --- MODAL: O QUE HÁ DE NOVO --- */}
+      {showWhatsNew && (
+        <div className="about-overlay" onClick={() => setShowWhatsNew(false)} style={{ zIndex: 10000 }}>
+            <div className="about-box" style={{ width: '550px', borderTop: '4px solid #00E676' }} onClick={e => e.stopPropagation()}>
+                <h2 className="about-title" style={{ color: '#00E676', marginBottom: '5px' }}>🚀 Novidades da Versão {APP_VERSION}</h2>
+                <p style={{ fontSize: '12px', color: '#B0BEC5', marginBottom: '20px' }}>Veja o que acabou de chegar no Monitoramento RPA</p>
+
+                <div className="about-content" style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '10px' }}>
+                    <div style={{ marginBottom: '18px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #00E5FF' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>📈 Previsões Semanais Híbridas</h4>
+                        <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
+                            Novo acompanhamento da evolução da produção acumulada aos domingos. A linha se funde magicamente do "Real" (azul) para a "Estimativa" (tracejado amarelo) no exato dia em que os dados consolidados terminam!
+                        </p>
+                    </div>
+
+                    <div style={{ marginBottom: '18px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #FFD740' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>⚡ Cache Diário Instantâneo</h4>
+                        <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
+                            O sistema agora baixa e armazena os dados agrupados por dia silenciosamente em segundo plano. Ao clicar no botão de previsões, o gráfico abre em milissegundos, sem telas de espera.
+                        </p>
+                    </div>
+
+                    <div style={{ marginBottom: '10px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #EF5350' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🎯 Status de Sincronização Inteligente</h4>
+                        <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
+                            O novo modal de aviso verifica milimetricamente se os dados do iW e do NDD fecharam em relação a ontem (D-1), indicando visualmente (verde ou vermelho) a exata fonte que atrasou a integração de dados.
+                        </p>
+                    </div>
+                </div>
+
+                <button className="btn-close-about" onClick={() => setShowWhatsNew(false)} style={{ marginTop: '20px', width: '100%', background: '#00E676', color: '#000', fontWeight: 'bold' }}>
+                    Explorar o Sistema
+                </button>
+            </div>
+        </div>
+      )}
+
+    {/* --- MODAL SOBRE (ABOUT) --- */}
       {showAbout && (
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
             <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
-                <p className="about-version">Versão 1.1.6</p>
+                <p className="about-version">Versão 1.1.7</p>
                 
                 <div className="about-content">
                     <p style={{textAlign: 'justify', marginBottom: '15px'}}>
@@ -1051,9 +1528,20 @@ const changePanelMonth = (delta: number) => {
                     </p>
                 </div>
 
-                <button className="btn-close-about" onClick={() => setShowAbout(false)}>
-                    Fechar
-                </button>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                    <button 
+                        className="btn-close-about" 
+                        onClick={() => { setShowAbout(false); setShowWhatsNew(true); }} 
+                        style={{ flex: 1, background: 'transparent', color: '#00E676', border: '1px solid #00E676', transition: 'all 0.2s ease' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = '#00E676'; e.currentTarget.style.color = '#000'; }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#00E676'; }}
+                    >
+                        Ver Novidades
+                    </button>
+                    <button className="btn-close-about" onClick={() => setShowAbout(false)} style={{ flex: 1 }}>
+                        Fechar
+                    </button>
+                </div>
             </div>
         </div>
       )}
@@ -1145,21 +1633,173 @@ const changePanelMonth = (delta: number) => {
           )}
       </div>
 
+    {/* --- MODAL DO COMPARATIVO SEMANAL --- */}
+      {showWeeklyModal && (
+        <div className="about-overlay" onClick={() => setShowWeeklyModal(false)} style={{ zIndex: 9999 }}>
+            <div className="about-box" style={{ width: '850px', maxWidth: '95%', borderTop: '4px solid #00E5FF', minHeight: '400px', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+                
+                {!weeklyData ? (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                        <div style={{ color: '#00E5FF', fontWeight: 'bold', fontSize: '16px' }}>Montando modelo diário...</div>
+                        <div style={{ color: '#B0BEC5', fontSize: '12px', marginTop: '10px' }}>Carregando e analisando os dados.</div>
+                    </div>
+                ) : (
+                    <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '20px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                    <h2 className="about-title" style={{ marginBottom: 0, color: '#00E5FF', textAlign: 'left' }}>Evolução Semanal Acumulada</h2>
+                                    
+                                    <div className="month-nav" style={{ display: 'flex', gap: 10 }}>
+                                        <button className="nav-btn" onClick={() => setWeeklyOffset(prev => prev + 1)} title="Mês Anterior">{'<'}</button>
+                                        <button className="nav-btn" disabled={weeklyOffset === 0} onClick={() => setWeeklyOffset(prev => prev - 1)} title="Mês Mais Recente">{'>'}</button>
+                                    </div>
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#B0BEC5', marginTop: '4px', textAlign: 'left' }}>Acompanhamento do fechamento</div>
+                            </div>
+                            
+                            {/* NOVO LADO DIREITO: FILTROS GLOBAIS E LEGENDA */}
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
+                                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+                                    {/* Empresa */}
+                                    <div style={{ position: 'relative' }}>
+                                        <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#B0BEC5', position: 'absolute', top: '-13px', left: '0' }}>EMPRESA</span>
+                                        <input 
+                                            list="companies-modal" placeholder={areCompaniesReady ? "Todas..." : "Carregando..."} value={tempCompany} onChange={handleInputChange} disabled={!areCompaniesReady} 
+                                            style={{ background: '#263238', color: '#fff', border: '1px solid #546E7A', borderRadius: '4px', padding: '0 8px', fontSize: '11px', width: '120px', height: '24px', boxSizing: 'border-box', outline: 'none' }} 
+                                        />
+                                        {tempCompany && <button onClick={clearCompanyFilter} style={{ position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#B0BEC5', cursor: 'pointer', fontSize: '11px', padding: 0 }}>✕</button>}
+                                        <datalist id="companies-modal">{companyList.map((c, i) => <option key={i} value={c} />)}</datalist>
+                                    </div>
+                                    
+                                    {/* Ano */}
+                                    <div style={{ position: 'relative' }}>
+                                        <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#B0BEC5', position: 'absolute', top: '-13px', left: '0' }}>ANO</span>
+                                        <select value={year} onChange={e => { setYear(Number(e.target.value)); setWeeklyOffset(0); }} style={{ background: '#263238', color: '#00E5FF', border: '1px solid #546E7A', borderRadius: '4px', padding: '0 8px', fontSize: '11px', width: '120px', height: '24px', boxSizing: 'border-box', outline: 'none', cursor: 'pointer' }}>
+                                            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                                        </select>
+                                    </div>
+                                    
+                                    {/* Fonte */}
+                                    <div style={{ position: 'relative' }}>
+                                        <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#B0BEC5', position: 'absolute', top: '-13px', left: '0' }}>FONTE</span>
+                                        <select value={source} onChange={e => setSource(e.target.value)} style={{ background: '#263238', color: '#00E5FF', border: '1px solid #546E7A', borderRadius: '4px', padding: '0 8px', fontSize: '11px', width: '120px', height: '24px', boxSizing: 'border-box', outline: 'none', cursor: 'pointer' }}>
+                                            <option value="Consolidado">Consolidado</option><option value="NDD">NDD</option><option value="iW">iW</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '15px', fontSize: '12px', fontWeight: 'bold' }}>
+                                    <div style={{ color: '#B0BEC5' }}><span style={{color: '#546E7A', fontSize: '14px'}}>■</span> {weeklyData.mesAntNome}</div>
+                                    <div style={{ color: '#fff' }}><span style={{color: '#00E5FF', fontSize: '14px'}}>■</span> {weeklyData.mesAtualNome}</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style={{ position: 'relative', width: '100%', height: '350px' }}>
+                            {/* Overlay com Spinner flutuando em cima do gráfico */}
+                            {isWeeklyLoading && (
+                                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                    <div className="loading-spinner" style={{ width: '40px', height: '40px' }}></div>
+                                </div>
+                            )}
+
+                            {/* O Gráfico em si, que agora recebe o efeito animado de Blur */}
+                            <div style={{ 
+                                boxSizing: 'border-box', /* <--- MÁGICA QUE RESOLVE A SOBREPOSIÇÃO AQUI */
+                                height: '100%', width: '100%', background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px', border: '1px solid #37474F',
+                                filter: isWeeklyLoading ? 'blur(4px)' : 'none',
+                                opacity: isWeeklyLoading ? 0.5 : 1,
+                                transition: 'all 0.3s ease',
+                                pointerEvents: isWeeklyLoading ? 'none' : 'auto'
+                            }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={weeklyData.points} margin={{ top: 55, right: 55, left: 20, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#37474F" vertical={false} />
+                                    
+                                    <XAxis dataKey="dia" type="number" domain={[1, weeklyData.totalDiasMes]} ticks={weeklyData.sundays} tickFormatter={(val) => `S${weeklyData.sundays.indexOf(val) + 1} (Dia ${val})`} stroke="#B0BEC5" tick={{fontSize: 11}} />
+                                    <YAxis stroke="#B0BEC5" tickFormatter={(val) => `${(val/1000000).toFixed(1)}M`} tick={{fontSize: 11}} />
+                                    
+                                    {/* Tooltip atualizado agora recebe o isCurrentOngoingMonth */}
+                                    <Tooltip content={<WeeklyEvolutionTooltip weeklyData={weeklyData} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} />} cursor={{ fill: 'transparent' }} />
+                                    
+                                    {/* Linha Vertical usa o Source Global */}
+                                    {weeklyData.isCurrentOngoingMonth && weeklyData.diasRealParaEsteMes > 0 && weeklyData.diasRealParaEsteMes < weeklyData.totalDiasMes && (
+                                        <ReferenceLine x={weeklyData.diasRealParaEsteMes} stroke="#B0BEC5" strokeWidth={2} strokeDasharray="3 3" label={<RenderVerticalLineLabel weeklySource={source} nddDate={formatDate(data?.last_update_ndd)} iwDate={formatDate(data?.last_update_iw)} />} />
+                                    )}
+
+                                    {/* As Tags do Gráfico */}
+                                    <Line name="Mês Anterior" type="monotone" dataKey="real_prev" stroke="#546E7A" strokeWidth={3} dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 6 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="real_prev" color="#90A4AE" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} />} />
+                                    
+                                    <Line name="Real" type="monotone" dataKey="real_curr" stroke="#00E5FF" strokeWidth={4} dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 7 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="real_curr" color="#00E5FF" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} />} />
+                                    
+                                    <Line name="Estimativa" type="monotone" dataKey="est_curr" stroke="#FFD740" strokeWidth={3} strokeDasharray="6 4" dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 5 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="est_curr" color="#FFD740" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} />} legendType="none" />
+                                </LineChart> 
+                            </ResponsiveContainer>
+                        </div>
+                        </div> {/* <--- NOVO FECHAMENTO AQUI! */}
+
+                        <button className="btn-close-about" style={{ marginTop: '20px', width: '100%' }} onClick={() => setShowWeeklyModal(false)}>
+                            Fechar Relatório
+                        </button>
+                    </>
+                )}
+            </div>
+        </div>
+      )}
+
       {!isInitialLoad && (
       <div className={`container ${isLoadingData ? 'blurred' : ''}`}>
-        <header>
-          {/* ... HEADER MANTIDO IGUAL ... */}
-          <div className="left-controls">
+        <header style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'start', minHeight: '65px', paddingBottom: '10px', gap: '10px' }}>
+          
+          {/* 1. ESQUERDA: Botões das abas (Alinhados ao início) */}
+          <div className="left-controls" style={{ display: 'flex', justifyContent: 'flex-start' }}>
             <div className="view-selector">
-                <button onClick={() => setCurrentView('production_current')} className={currentView === 'production_current' ? 'active' : ''}>Produção (Atual)</button>
+                <button onClick={() => setCurrentView('production_current')} className={currentView === 'production_current' ? 'active' : ''}>Produção</button>
                 <button onClick={() => setCurrentView('production_compare')} className={currentView === 'production_compare' ? 'active' : ''}>Ano a Ano</button>
                 <button onClick={() => setCurrentView('communication')} className={currentView === 'communication' ? 'active' : ''}>Comunicação</button>
                 <button onClick={() => setCurrentView('monitoring')} className={currentView === 'monitoring' ? 'active' : ''}>Monitoramento</button>
             </div>
           </div>
-          <h2>{currentView === 'production_compare' ? `Comparativo ${year} vs ${year-1}` : currentView === 'communication' ? 'Status de Comunicação' : currentView === 'monitoring' ? 'Monitoramento de Parque (MIF)' : 'Visão Geral de Produção'}</h2>
-          {currentView !== 'monitoring' && (
-            <div className="filters">
+          
+          {/* 2. CENTRO: Título e Botão (Garantidos no centro sem sobreposição) */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              <h2 style={{ margin: 0, whiteSpace: 'nowrap' }}>
+                {currentView === 'production_compare' ? `Comparativo ${year} vs ${year-1}` : currentView === 'communication' ? 'Status de Comunicação' : currentView === 'monitoring' ? 'Monitoramento de Parque (MIF)' : 'Visão Geral de Produção'}
+              </h2>
+              
+              {/* Botão Retangular, sem borda, seguindo o padrão das abas */}
+              {currentView === 'production_current' && (
+                  <button 
+                      onClick={() => { setWeeklyOffset(0); setShowWeeklyModal(true); }}
+                      title="Ver previsões semanais acumuladas"
+                      style={{ 
+                          background: 'rgba(0, 229, 255, 0.08)', 
+                          color: '#00E5FF', 
+                          border: 'none', 
+                          padding: '6px 14px', 
+                          borderRadius: '4px', /* Visual retangular */
+                          fontSize: '11px', 
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '6px', 
+                          marginTop: '6px',
+                          transition: 'all 0.2s ease'
+                      }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(0, 229, 255, 0.15)'; }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(0, 229, 255, 0.08)'; }}
+                  >
+                      <span style={{ fontSize: '13px' }}>📈</span> Previsões Semanais
+                  </button>
+              )}
+          </div>
+          
+          {/* 3. DIREITA: Filtros (Mais próximos e alinhados ao final) */}
+          {currentView !== 'monitoring' ? (
+            <div className="filters" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+               
                <div className="filter-group">
                    <label>Empresa</label>
                    <div className="input-wrapper">
@@ -1168,10 +1808,25 @@ const changePanelMonth = (delta: number) => {
                        <datalist id="companies">{companyList.map((c, i) => <option key={i} value={c} />)}</datalist>
                    </div>
                </div>
-               <div className="filter-group"><label>Ano</label><select value={year} onChange={e => setYear(Number(e.target.value))}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div>
-               <div className="filter-group"><label>Fonte</label><select value={source} onChange={e => setSource(e.target.value)}><option value="Consolidado">Consolidado</option><option value="NDD">NDD</option><option value="iW">iW</option></select></div>
+               
+               <div className="filter-group">
+                   <label>Ano</label>
+                   <select value={year} onChange={e => setYear(Number(e.target.value))}>
+                       {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                   </select>
+               </div>
+               
+               <div className="filter-group">
+                   <label>Fonte</label>
+                   <select value={source} onChange={e => setSource(e.target.value)}>
+                       <option value="Consolidado">Consolidado</option>
+                       <option value="NDD">NDD</option>
+                       <option value="iW">iW</option>
+                   </select>
+               </div>
+               
             </div>
-          )}
+          ) : <div /> /* Div vazia necessária para manter a estrutura de 3 colunas do Grid */}
         </header>
 
         <div className="chart-frame">
@@ -1251,27 +1906,62 @@ const changePanelMonth = (delta: number) => {
         </div>
 
         <footer>
-          <div className="footer-left">
-            <span style={{ color: '#B0BEC5' }}>Atualizado em:</span>
-            <div className="footer-item" onClick={() => open('https://www.ndd.com.br')} style={{cursor: 'pointer'}}><span>NDD:</span> <b>{formatDate(data?.last_update_ndd)}</b></div>
-            <div className="separator">|</div>
-            <div className="footer-item" onClick={() => open('https://www.canon.com.br')} style={{cursor: 'pointer'}}><span>iW:</span> <b>{formatDate(data?.last_update_iw)}</b></div>
-          </div>
-        <div className="footer-right">
-                    {currentView !== 'monitoring' && <>
-                        <span className="footer-stat" title="Total de empresas ativas no ano selecionado">Empresas no Ano: <b>{footerStats.companies.toLocaleString()}</b></span>
-                        <span className="separator">|</span>
-                        <span className="footer-stat">Equipamentos: <b>{footerStats.equipments.toLocaleString()}</b></span>
-                        <span className="separator">|</span>
-                    </>}
-                    {(bgLoading || !areCompaniesReady) && <span className="footer-spinner"></span>}
-                    <span className="status-text">{statusText}</span>
-                    
-                    {/* --- ÍCONE DISCRETO DO SOBRE --- */}
-                    <button className="about-icon-btn" onClick={() => setShowAbout(true)} title="Sobre o Sistema">
-                        <Info size={16} />
-                    </button>
+            <div className="footer-left">
+                <span style={{ color: '#B0BEC5', marginRight: '5px' }}>Atualizado em:</span>
+                
+                <div 
+                    className="footer-item" 
+                    title={syncDates.nddISO !== "N/D" && syncDates.nddISO >= syncDates.targetISO ? "✅ Banco de dados atualizado" : `⚠️ Desatualizado (Esperado: ${syncDates.targetBR})`} 
+                    style={{cursor: 'help'}}
+                >
+                    <span>NDD:</span> <b>{formatDate(data?.last_update_ndd)}</b>
                 </div>
+                
+                <div className="separator">|</div>
+                
+                <div 
+                    className="footer-item" 
+                    title={syncDates.iwISO !== "N/D" && syncDates.iwISO >= syncDates.targetISO ? "✅ Banco de dados atualizado" : `⚠️ Desatualizado (Esperado: ${syncDates.targetBR})`} 
+                    style={{cursor: 'help'}}
+                >
+                    <span>iW:</span> <b>{formatDate(data?.last_update_iw)}</b>
+                </div>
+            </div>
+<div className="footer-right" style={{ display: 'flex', alignItems: 'center' }}>
+              {currentView !== 'monitoring' && <>
+                  <span className="footer-stat" title="Total de empresas ativas no ano selecionado">Empresas no Ano: <b>{footerStats.companies.toLocaleString()}</b></span>
+                  <span className="separator">|</span>
+                  <span className="footer-stat">Equipamentos: <b>{footerStats.equipments.toLocaleString()}</b></span>
+                  <span className="separator">|</span>
+              </>}
+              
+              {/* --- NOVO BLOCO: Textos fluidos de Ação e Sistema --- */}
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-end', minHeight: '30px', marginRight: '5px' }}>
+                  
+                  {/* Mensagem do Usuário (Alinhamento normal, ou empurrada pra cima se houver log de sistema) */}
+                  <span style={{ color: '#00E5FF', fontSize: '11px', lineHeight: '1.2' }}>
+                      {activeContext}
+                  </span>
+                  
+                  {/* Mensagem do Sistema (Amarela, aparece embutida logo abaixo) */}
+                  {statusText && !statusText.startsWith("Visualizando") && statusText !== "Consolidado." && (
+                      <div style={{ display: 'flex', alignItems: 'center', marginTop: '2px' }}>
+                          {(bgLoading || !areCompaniesReady || statusText.includes("Baixando") || statusText.includes("Filtrando") || statusText.includes("Verificando")) && (
+                              <span className="footer-spinner" style={{ marginRight: '5px', width: '10px', height: '10px', borderWidth: '2px' }}></span>
+                          )}
+                          <span style={{ color: '#FFD740', fontStyle: 'italic', fontSize: '10px', lineHeight: '1.2', margin: 0 }}>
+                              {statusText}
+                          </span>
+                      </div>
+                  )}
+              </div>
+              {/* --------------------------------------------------- */}
+              
+              {/* --- ÍCONE DISCRETO DO SOBRE --- */}
+              <button className="about-icon-btn" onClick={() => setShowAbout(true)} title="Sobre o Sistema" style={{ marginLeft: '5px' }}>
+                  <Info size={16} />
+              </button>
+          </div>
             </footer>
       </div>
       )}

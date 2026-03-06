@@ -1,6 +1,6 @@
 [package]
 name = "ndd-sql"
-version = "0.1.0"
+version = "1.1.7"
 description = "Monitoramento RPA"
 authors = ["you"]
 edition = "2021"

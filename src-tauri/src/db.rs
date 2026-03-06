@@ -578,4 +578,50 @@ pub async fn get_monitoring_stats(&self) -> Result<crate::models::MonitoringData
         result.sort_by(|a, b| b.mif.cmp(&a.mif)); // Ordena do maior cliente para o menor
         Ok(result)
     }
+
+    // ==================================================================================
+    // NOVA FUNÇÃO: PRODUÇÃO DIÁRIA (Usada no Gráfico Comparativo Semanal)
+    // ==================================================================================
+    pub async fn get_daily_production(&self, year: i32, month: i32, source: String, company_filter: Option<Vec<String>>) -> Result<Vec<crate::DailyProd>, Box<dyn Error + Send + Sync>> {
+        let iw_exclusion = r#"
+            AND [Cadastrado no iW] = 'sim'
+            AND NOT EXISTS (
+                SELECT 1 FROM vw_NDD n WHERE n.SerialNumber = w.[Serial#]
+                AND YEAR(n.data) = YEAR(w.data) AND MONTH(n.data) = MONTH(w.data)
+            )
+        "#;
+
+        let mut query = format!(r#"
+            SELECT dia, SUM(total) as total
+            FROM (
+                SELECT DAY(data) as dia, 'NDD' as source, EnterpriseName as empresa, 
+                       (CAST(ISNULL(pb_total, 0) as bigint) + CAST(ISNULL(cor_total, 0) as bigint)) as total
+                FROM vw_NDD WHERE YEAR(data) = {} AND MONTH(data) = {}
+
+                UNION ALL
+
+                SELECT DAY(data) as dia, 'IW' as source, [Ship To Name] as empresa, 
+                       (CAST(ISNULL(pb_total, 0) as bigint) + CAST(ISNULL(cor_total, 0) as bigint)) as total
+                FROM vw_IW_Main w WHERE YEAR(data) = {} AND MONTH(data) = {} {}
+            ) as Combined
+            WHERE 1=1
+        "#, year, month, year, month, iw_exclusion);
+
+        if source != "Consolidado" {
+            let source_upper = source.to_uppercase();
+            query.push_str(&format!(" AND source = '{}'", source_upper));
+        }
+
+        if let Some(companies) = company_filter {
+            if !companies.is_empty() {
+                let list_str = companies.iter().map(|c| format!("'{}'", c.replace("'", "''"))).collect::<Vec<_>>().join(",");
+                query.push_str(&format!(" AND empresa IN ({})", list_str));
+            }
+        }
+
+        query.push_str(" GROUP BY dia ORDER BY dia");
+
+        let records = sqlx::query_as::<_, crate::DailyProd>(&query).fetch_all(&self.pool).await?;
+        Ok(records)
+    }
 }

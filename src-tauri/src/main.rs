@@ -382,6 +382,38 @@ async fn fetch_monitoring_data(window: Window, state: tauri::State<'_, AppState>
     Ok(result)
 }
 
+#[derive(serde::Serialize, sqlx::FromRow)]
+pub struct DailyProd {
+    pub dia: i32,
+    pub total: i64,
+}
+
+#[tauri::command]
+async fn fetch_daily_production(
+    state: tauri::State<'_, AppState>, 
+    year: i32, 
+    month: i32, 
+    source: String, 
+    company: Option<String>
+) -> Result<Vec<DailyProd>, String> {
+    // Resolve os nomes originais (RAW) da empresa para não errar no filtro, igual as outras abas fazem!
+    let target_raw_names = if let Some(comp_name) = company.as_deref() {
+        if !comp_name.trim().is_empty() {
+            let map = get_or_create_company_map(state.clone(), year).await?;
+            map.get(comp_name).cloned() 
+        } else { None }
+    } else { None };
+
+    if company.is_some() && target_raw_names.is_none() {
+        return Ok(vec![]); // Retorna vazio rápido se a empresa não existir no mês/ano selecionado
+    }
+
+    let db_guard = state.db.lock().await;
+    let db = db_guard.as_ref().ok_or("Banco desconectado")?;
+    
+    db.get_daily_production(year, month, source, target_raw_names).await.map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState { 
@@ -392,7 +424,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             fetch_dashboard_data, fetch_companies, perform_initial_load, 
             fetch_full_history, finalize_startup, quit_app, fetch_monitoring_data,
-            fetch_month_details_cmd, fetch_month_summary_cmd, fetch_monitoring_company_summary
+            fetch_month_details_cmd, fetch_month_summary_cmd, fetch_monitoring_company_summary,
+            fetch_daily_production
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
