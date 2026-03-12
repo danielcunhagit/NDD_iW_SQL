@@ -1,11 +1,11 @@
 {
-  "version": "v1.1.7",
-  "notes": "🚀 Novidades da versão 1.1.7:\n\n📈 Novo Gráfico de Evolução Semanal Híbrido (Real vs Estimativa).\n⚡ Motor de cache diário para carregamento instantâneo de painéis.\n🎯 Novo alerta inteligente de status de sincronização de dados (D-1).\n🔄 Sincronização em tempo real dos filtros (Empresa, Ano e Fonte) entre todas as abas.\n✨ Diversas melhorias visuais, transições dinâmicas e otimizações de performance.",
-  "pub_date": "2026-03-06T12:00:00Z",
+  "version": "2.0.0",
+  "notes": "A Grande Atualização 2.0 chegou! Motor Local-First, Modo Offline, Sincronização em Background e Previsões Semanais.",
+  "pub_date": "2026-03-12T10:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1hsemZIVkZYRkpRY1gzamdvRk0vN0hLdXJQUjdRc1plSDE0SCtaOUlxMUFVWDZkMktkNmlzUXh0aXJudmhkTDZ6U3ZLNC9UVmVFTzYyM0hmM0MwNmc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcyNzk5NjQzCWZpbGU6bmRkLXNxbF8xLjEuN194NjQtc2V0dXAubnNpcy56aXAKVkZMSjVRSWdZTVVGMVEvQWVianJtSmZJYnloQUVTOUFnWFdKb3hOcTgzd2FpUWxQbHo3eGtpL3hFLzQ1ZHdLNGpDRnNKdDBPMHBQSGV4YTJmSHlKQmc9PQo=",
-      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v1.1.7/ndd-sql_1.1.7_x64-setup.nsis.zip"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM2FQMXY2TlRFcnNObmZMbEdBMldZZEdLMDJJMGc2U2QwS0RQVkhQSS9NZC9KeUo2MjIvQTdVOEdWL1h4aDFKWDhobmljeFFLZGZWeHhsT2FOelk3d2c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzczMzI3OTM1CWZpbGU6bmRkLXNxbF8yLjAuMF94NjQtc2V0dXAubnNpcy56aXAKWDdtb3dIQlhHamdDSFF3Zm9PbjVhQzlnOWdaWjByWWQ5ZlJ2a3l2b1lpa0VHK0doZi94YmlpT1MrQldadXFDMm5XbUpLMVlraWxmUWZ6SmtCSE1HREE9PQo=",
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v2.0.0/ndd-sql_2.0.0_x64-setup.nsis.zip"
     }         
   }
 }
