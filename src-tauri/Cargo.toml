@@ -1,6 +1,6 @@
 [package]
 name = "ndd-sql"
-version = "1.1.7"
+version = "2.0.0"
 description = "Monitoramento RPA"
 authors = ["you"]
 edition = "2021"
@@ -18,8 +18,8 @@ tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 
-# VERSÃO TRAVADA NA 0.6.3 COMO SOLICITADO
-sqlx = { version = "=0.6.3", features = ["runtime-tokio-rustls", "mssql", "chrono", "macros", "offline"] }
+# Adicionamos o "sqlite" na lista de features!
+sqlx = { version = "=0.6.3", features = ["runtime-tokio-rustls", "mssql", "sqlite", "chrono", "macros", "offline"] }
 
 [features]
 # Esta seção exige que a dependência 'tauri' exista acima

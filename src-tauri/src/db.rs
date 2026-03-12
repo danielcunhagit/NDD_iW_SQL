@@ -71,6 +71,11 @@ impl Database {
             .await?;
         Ok(Self { pool })
     }
+    
+    // Adicione esta função para o sincronizador poder ler o banco em background
+    pub fn get_pool_clone(&self) -> MssqlPool {
+        self.pool.clone()
+    }
 
     fn normalize_serial(serial: &str) -> String {
         serial.trim().to_uppercase()
@@ -109,7 +114,7 @@ impl Database {
             SELECT source, ano, mes, 
                    SUM(pb) as pb, 
                    SUM(cor) as cor, 
-                   COUNT(DISTINCT CASE WHEN (pb + cor) > 0 THEN serial END) as devices 
+                   CAST(COUNT(DISTINCT CASE WHEN (pb + cor) > 0 THEN serial END) AS BIGINT) as devices 
             FROM (
                 SELECT 'NDD' as source, YEAR(data) as ano, MONTH(data) as mes, SerialNumber as serial, CAST(ISNULL(pb_total, 0) as bigint) as pb, CAST(ISNULL(cor_total, 0) as bigint) as cor, EnterpriseName as empresa 
                 FROM vw_NDD WHERE {}
@@ -380,25 +385,32 @@ pub async fn get_monitoring_stats(&self) -> Result<crate::models::MonitoringData
 
     // --- SIDE PANEL ---
     pub async fn get_active_companies_in_year(&self, year: i32) -> Result<Vec<(String, i64)>, Box<dyn Error + Send + Sync>> {
+        // Nova query que soma a produção P&B e Cor e garante que só traz quem imprimiu de verdade (> 0)
         let query = format!(r#"
-            SELECT empresa, SUM(cnt) as cnt 
+            SELECT empresa, SUM(prod) as cnt 
             FROM (
-                SELECT EnterpriseName as empresa, COUNT(*) as cnt FROM vw_NDD WHERE YEAR(data) = {} GROUP BY EnterpriseName
+                SELECT EnterpriseName as empresa, (CAST(ISNULL(pb_total, 0) as bigint) + CAST(ISNULL(cor_total, 0) as bigint)) as prod 
+                FROM vw_NDD WHERE YEAR(data) = {}
+                
                 UNION ALL
-                SELECT [Ship To Name] as empresa, COUNT(*) as cnt FROM vw_IW_Main WHERE YEAR(data) = {} GROUP BY [Ship To Name]
+                
+                SELECT [Ship To Name] as empresa, (CAST(ISNULL(pb_total, 0) as bigint) + CAST(ISNULL(cor_total, 0) as bigint)) as prod 
+                FROM vw_IW_Main WHERE YEAR(data) = {}
             ) as AllComps
             GROUP BY empresa 
+            HAVING SUM(prod) > 0
             ORDER BY empresa
         "#, year, year);
         
-        let rows: Vec<(Option<String>, i32)> = sqlx::query_as(&query).fetch_all(&self.pool).await?;
+        // Importante: Alteramos de i32 para i64 aqui, pois a soma da produção pode ultrapassar o limite do i32 (mais de 2 bilhões)
+        let rows: Vec<(Option<String>, i64)> = sqlx::query_as(&query).fetch_all(&self.pool).await?;
         
         let mut map: HashMap<String, i64> = HashMap::new();
         for (name_opt, cnt) in rows {
             if let Some(name) = name_opt {
                 let clean = Self::normalize_company_name(&name);
                 if !clean.is_empty() {
-                    *map.entry(clean).or_insert(0) += cnt as i64;
+                    *map.entry(clean).or_insert(0) += cnt;
                 }
             }
         }

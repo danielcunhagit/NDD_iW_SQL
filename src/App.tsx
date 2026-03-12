@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import "./App.css";
-import { Info } from "lucide-react";
+import { Info, Cloud, HardDrive, RefreshCw } from "lucide-react";
 
 // --- TYPES (Mantidos) ---
 interface DashboardData {
@@ -586,28 +586,56 @@ const RenderVerticalLineLabel = (props: any) => {
 };
 
 const RenderWeeklyLabel = (props: any) => {
-    const { x, y, value, index, sundays, lineKey, color, currentDay, isCurrentOngoingMonth, totalDiasMes } = props;
+    const { x, y, value, index, sundays, lineKey, color, currentDay, isCurrentOngoingMonth, totalDiasMes, allPoints } = props;
     const dia = index + 1;
 
     if (value == null) return null;
 
-    // A CAIXINHA DE PRODUÇÃO FINAL NO ÚLTIMO DIA DO MÊS (Para todas as situações)
+    // NOVO: Motor Inteligente Anti-Encavalamento
+    let pushDown = false;
+    if (allPoints && allPoints[index]) {
+        const currentPoint = allPoints[index];
+        let otherValue = null;
+
+        // Descobre qual é o valor da "outra" linha para comparar
+        if (lineKey === 'real_prev') {
+            otherValue = isCurrentOngoingMonth ? currentPoint.est_curr : currentPoint.real_curr;
+        } else {
+            otherValue = currentPoint.real_prev;
+        }
+
+        if (otherValue != null && value > 0) {
+            // Se a diferença entre as linhas for menor que 8%, nós separamos os rótulos
+            const diffPct = Math.abs(value - otherValue) / Math.max(value, otherValue);
+            if (diffPct < 0.08) {
+                // O menor valor é empurrado para baixo da linha. 
+                // Em caso de empate exato, o mês anterior vai para baixo.
+                if (value < otherValue) {
+                    pushDown = true;
+                } else if (value === otherValue && lineKey === 'real_prev') {
+                    pushDown = true;
+                }
+            }
+        }
+    }
+
+    // A CAIXINHA DE PRODUÇÃO FINAL NO ÚLTIMO DIA DO MÊS
     if (dia === totalDiasMes) {
         let drawBox = false;
         
-        // 1. Desenha para a linha do mês anterior (Cinza)
         if (lineKey === 'real_prev') drawBox = true;
-        // 2. Desenha para a linha do mês atual SE o mês já estiver fechado/passado (Azul)
         if (lineKey === 'real_curr' && !isCurrentOngoingMonth) drawBox = true;
-        // 3. Desenha para a linha de estimativa SE o mês estiver em andamento (Amarela)
         if (lineKey === 'est_curr' && isCurrentOngoingMonth) drawBox = true;
 
         if (drawBox) {
+            // Ajusta a posição Y dependendo se a colisão mandou empurrar para baixo
+            const boxY = pushDown ? y + 12 : y - 32;
+            const textY = pushDown ? y + 26 : y - 18;
+
             return (
                 <g style={{ filter: 'drop-shadow(2px 2px 3px rgba(0,0,0,0.5))' }}>
-                    {/* A cor da borda e do texto herda dinamicamente a cor da respectiva linha */}
-                    <rect x={x - 35} y={y - 32} width={70} height={20} fill="#263238" stroke={color} strokeWidth={1.5} rx={4} ry={4} />
-                    <text x={x} y={y - 18} fill={color} textAnchor="middle" fontSize={11} fontWeight="bold">
+                    <rect x={x - 35} y={boxY} width={70} height={20} fill="#263238" stroke={color} strokeWidth={1.5} rx={4} ry={4} />
+                    <text x={x} y={textY} fill={color} textAnchor="middle" fontSize={11} fontWeight="bold">
                         {fmtMilhar(value)}
                     </text>
                 </g>
@@ -619,8 +647,11 @@ const RenderWeeklyLabel = (props: any) => {
     if (!sundays || !sundays.includes(dia)) return null;
     if (lineKey === 'est_curr' && dia <= currentDay) return null;
 
+    // Se houver colisão no domingo, empurra o texto para baixo da bolinha
+    const textY = pushDown ? y + 20 : y - 12;
+
     return (
-        <text x={x} y={y - 12} fill={color} textAnchor="middle" fontSize={11} fontWeight="bold" style={{ textShadow: '1px 1px 3px rgba(0,0,0,0.8), -1px -1px 3px rgba(0,0,0,0.8)' }}>
+        <text x={x} y={textY} fill={color} textAnchor="middle" fontSize={11} fontWeight="bold" style={{ textShadow: '1px 1px 3px rgba(0,0,0,0.8), -1px -1px 3px rgba(0,0,0,0.8)' }}>
             {(Number(value) / 1000000).toFixed(1)}M
         </text>
     );
@@ -705,7 +736,6 @@ function App() {
   const [loadingMsg, setLoadingMsg] = useState(""); 
   const [statusText, setStatusText] = useState("");
   const [data, setData] = useState<DashboardData | null>(null);
-  const [consolidatedData, setConsolidatedData] = useState<DashboardData | null>(null);
   const [companyCache, setCompanyCache] = useState<Record<string, DashboardData>>({}); 
   const [monitoringData, setMonitoringData] = useState<MonitoringData | null>(null);
   const [companySummaries, setCompanySummaries] = useState<MonitoringCompanySummary[]>([]);
@@ -719,9 +749,158 @@ function App() {
   const [syncDates, setSyncDates] = useState({ targetISO: '', nddISO: '', iwISO: '', targetBR: '', nddBR: '', iwBR: '' });
   const [companyList, setCompanyList] = useState<string[]>([]);
   const [currentView, setCurrentView] = useState<ViewType>('production_current');  
+  const [syncProgressText, setSyncProgressText] = useState("");
+  const [isUsingLocalDB, setIsUsingLocalDB] = useState(true);
+  const [showOfflineWarning, setShowOfflineWarning] = useState(false);
+  const [hasSyncFailed, setHasSyncFailed] = useState(false); // <--- ESTADO NOVO AQUI
+  const [isFullySynced, setIsFullySynced] = useState(false);
+  const hasDownloadedRef = useRef(false); // Memória para saber se algo foi baixado
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Gatilho de recarga segura
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [source, setSource] = useState("Consolidado");
+  const [tempCompany, setTempCompany] = useState(""); 
+  const [selectedCompany, setSelectedCompany] = useState("");
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [panelLoading, setPanelLoading] = useState(false);
+  const [panelMonthIndex, setPanelMonthIndex] = useState(0);
+  const [panelData, setPanelData] = useState<any[]>([]); 
+  const [panelType, setPanelType] = useState<'detail' | 'summary'>('detail');
+  const [activeTab, setActiveTab] = useState<'producing' | 'stopped'>('producing');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'total', direction: 'desc' });
+  const [panelCache, setPanelCache] = useState<Record<string, any[]>>({});
+  const fetchedKeys = useRef<Set<string>>(new Set());
+  const dailyRawCache = useRef<Record<string, any[]>>({}); // Cache super rápido para o gráfico de linhas
+  const [showNoUpdateModal, setShowNoUpdateModal] = useState(false);
+
+// AUTO-ATUALIZAÇÃO INTELIGENTE (Sem perder o cache da Visão Consolidada)
+  useEffect(() => {
+      if (refreshTrigger > 0) {
+          // MÁGICA: Limpa a tela do Monitoramento para forçar ela a ler o novo cache fresco baixado!
+          setMonitoringData(null);
+          setCompanySummaries([]);
+
+          const updateCacheSilently = async () => {
+              try {
+                  // MÁGICA 2: O robô baixou dados novos? Recalcula a visão "GERAL" no fundo silenciosamente
+                  const geralData = await invoke<DashboardData>("fetch_dashboard_data", { year: year });
+                  
+                  let compData = null;
+                  if (selectedCompany) {
+                      // Se você estiver com uma empresa filtrada agora, atualiza ela também
+                      compData = await invoke<DashboardData>("fetch_dashboard_data", { year: year, company: selectedCompany });
+                      setData(compData);
+                  } else {
+                      setData(geralData);
+                  }
+                  
+                  // CORREÇÃO: Não apaga o cache antigo! Apenas adiciona/atualiza as chaves do ano atual.
+                  setCompanyCache(prev => {
+                      const updatedCache = { ...prev };
+                      updatedCache[`${year}-GERAL`] = geralData;
+                      if (selectedCompany && compData) {
+                          updatedCache[`${year}-${selectedCompany}`] = compData;
+                      }
+                      return updatedCache;
+                  });
+              } catch (err) {
+                  console.error(err);
+              }
+          };
+          updateCacheSilently();
+      }
+  }, [refreshTrigger]); // Apenas o trigger para não engavetar quando trocar de ano
+
+  // ATUALIZADOR GLOBAL DE DATAS E AVISOS (O Cérebro do Tempo)
+  useEffect(() => {
+      if (!data) return;
+
+      // 1. Atualiza o Rodapé sempre que os dados mudarem (seja via cache, filtro ou robô)
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yyyy = yesterday.getFullYear();
+      const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+      const dd = String(yesterday.getDate()).padStart(2, '0');
+      const targetDateStr = `${yyyy}-${mm}-${dd}`;
+
+      setSyncDates({
+          targetISO: targetDateStr,
+          nddISO: data.last_update_ndd || "N/D",
+          iwISO: data.last_update_iw || "N/D",
+          targetBR: `${dd}/${mm}/${yyyy}`,
+          nddBR: formatDate(data.last_update_ndd),
+          iwBR: formatDate(data.last_update_iw)
+      });
+
+      // 2. AVALIAÇÃO INTELIGENTE: Só julga a data DEPOIS que a nuvem respondeu!
+      // isFullySynced garante que o robô de inicialização ou o botão de atualizar já terminaram o trabalho.
+      if (isFullySynced && !hasSyncFailed) {
+          let outdated = [];
+          if (data.last_update_ndd !== "N/D" && data.last_update_ndd < targetDateStr) outdated.push("NDD Print");
+          if (data.last_update_iw !== "N/D" && data.last_update_iw < targetDateStr) outdated.push("iW Remote");
+          
+          if (outdated.length > 0) {
+              setOutdatedText(outdated.join(" e o "));
+              setShowDataWarning(true);
+          } else {
+              setShowDataWarning(false); // Fecha o aviso sozinho se a nuvem atualizou as datas!
+          }
+      }
+  }, [data, isFullySynced, hasSyncFailed]);
+
+  // Auto-limpador inteligente de mensagens do rodapé
+  useEffect(() => {
+      if (!statusText) return;
+      const t = statusText.toLowerCase();
+      // Se a mensagem contiver alguma dessas palavras de "Conclusão", ele apaga após 4s
+      if (t.includes("atualizada") || t.includes("pronto") || t.includes("completo") || t.includes("restaurada") || t.includes("(cache)") || t.includes("offline")) {
+          const timer = setTimeout(() => setStatusText(""), 4000);
+          return () => clearTimeout(timer);
+      }
+  }, [statusText]);
+
+  // ---> FUNÇÃO PARA O BOTÃO DE ATUALIZAR <---
+  const handleManualSync = async () => {
+      if (syncProgressText || bgLoading) return; // Impede duplo clique
+      
+      setSyncProgressText("Verificando servidor...");
+      try {
+          const hasUpdates = await invoke<boolean>("check_for_updates");
+          
+          if (!hasUpdates) {
+              setSyncProgressText("");
+              setIsFullySynced(true); // <--- AVISA O CÉREBRO QUE A NUVEM JÁ FOI CHECADA
+              setShowNoUpdateModal(true); 
+          } else {
+              setIsFullySynced(false); 
+              setHasSyncFailed(false);
+              setShowDataWarning(false); // <--- ESCONDE O AVISO ENQUANTO BAIXA
+              setSyncProgressText("Iniciando download da nuvem...");
+              await invoke("trigger_background_sync"); // Inicia o robô
+          }
+      } catch (e) {
+          console.error(e);
+          setSyncProgressText("");
+          setHasSyncFailed(true);
+          setShowOfflineWarning(true);
+      }
+  };
+  
+// MÁGICA: A FUNÇÃO FORMATADORA DO EIXO Y DEVE ESTAR AQUI DENTRO!
+  const formatYAxis = (val: number) => {
+      if (currentView === 'communication') {
+          // Se estiver na comunicação (percentual), limita a 100% no visual
+          const pct = Math.round(val * 100);
+          return pct > 100 ? '100%' : `${pct}%`;
+      }
+      // Se for produção, mostra em milhões (ex: 2.5M)
+      return `${(val / 1000000).toFixed(1)}M`;
+  };
   
   // ---> LÓGICA DE "O QUE HÁ DE NOVO" <---
-  const APP_VERSION = "1.1.7"; // Mude isso no futuro para disparar a janela de novo!
+  const APP_VERSION = "2.0.0"; // Mude isso no futuro para disparar a janela de novo!
   const [showWhatsNew, setShowWhatsNew] = useState(false);
 
   useEffect(() => {
@@ -741,27 +920,13 @@ function App() {
                 return () => clearTimeout(timer);
             }
         }, [currentView]);
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [source, setSource] = useState("Consolidado");
-  const [tempCompany, setTempCompany] = useState(""); 
-  const [selectedCompany, setSelectedCompany] = useState("");
-
-  const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const [panelLoading, setPanelLoading] = useState(false);
-  const [panelMonthIndex, setPanelMonthIndex] = useState(0);
-  const [panelData, setPanelData] = useState<any[]>([]); 
-  const [panelType, setPanelType] = useState<'detail' | 'summary'>('detail');
-  const [activeTab, setActiveTab] = useState<'producing' | 'stopped'>('producing');
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 15;
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'total', direction: 'desc' });
-  const [panelCache, setPanelCache] = useState<Record<string, any[]>>({});
-  const fetchedKeys = useRef<Set<string>>(new Set());
-  const dailyRawCache = useRef<Record<string, any[]>>({}); // Cache super rápido para o gráfico de linhas
 
 // --- PRÉ-CARREGAMENTO E LOGS APRIMORADOS ---
   useEffect(() => {
       if (!data || !data.production) return;
+
+      // ---> MÁGICA: Impede o engavetamento! Só faz as consultas de fundo depois que a lista de empresas estiver 100% livre.
+      if (!areCompaniesReady) return;
 
       const monthsToFetch = [...new Set(
           data.production
@@ -858,7 +1023,50 @@ function App() {
 
       prefetchAll();
       return () => { isCancelled = true; };
-  }, [data, year, selectedCompany, source]); // <--- Adicionado o 'source' aqui para atualizar o texto ao mudar a fonte
+  }, [data, year, selectedCompany, source]); 
+  
+  // RECUPERADOR DO DIAGRAMA E DAS TABELAS (Desacoplado e Inteligente)
+  useEffect(() => {
+      let isCancelled = false;
+
+      const tryFetchMIF = () => {
+          // MÁGICA: Removido o bloqueio da aba! Agora ele baixa invisível no fundo desde o 1º segundo.
+          if (isCancelled) return;
+
+          // 1. Tenta buscar o diagrama principal (Cards)
+          if (!monitoringData) {
+              invoke<MonitoringData>("fetch_monitoring_data").then(res => {
+                  if (!isCancelled) setMonitoringData(res);
+              }).catch(() => {
+                  if (!isCancelled) setTimeout(tryFetchMIF, 2500); 
+              });
+          }
+
+          // 2. Tenta buscar a tabela de empresas (Modal)
+          if (companySummaries.length === 0) {
+              setIsLoadingSummaries(true);
+              invoke<MonitoringCompanySummary[]>("fetch_monitoring_company_summary")
+                  .then(summaries => {
+                      if (!isCancelled) {
+                          setCompanySummaries(summaries);
+                          setIsLoadingSummaries(false);
+                      }
+                  })
+                  .catch(() => { 
+                      // Se o banco estiver ocupado, destrava o loading e tenta de novo depois
+                      if (!isCancelled) {
+                          setIsLoadingSummaries(false);
+                          setTimeout(tryFetchMIF, 2500);
+                      }
+                  });
+          }
+      };
+
+      tryFetchMIF();
+      
+      // Limpeza segura: garante que o loading nunca fique preso se você trocar de aba
+      return () => { isCancelled = true; setIsLoadingSummaries(false); };
+  }, [currentView, monitoringData, companySummaries.length]);
 
   // Atualiza as empresas quando o ano muda
   useEffect(() => { 
@@ -894,13 +1102,24 @@ function App() {
     }, [data]);
 
   useEffect(() => {
-    let unlisten: any; let unlistenMonitor: any; let unlistenLoading: any; let unlistenCompanies: any;
+    let unlisten: any; let unlistenMonitor: any; let unlistenLoading: any; let unlistenSync: any; let unlistenCompanies: any; let unlistenFailed: any; let unlistenChunk: any; let unlistenStartupFailed: any;
     
-    // 1. REGISTRA OS OUVINTES SEMPRE (Resolve o bloqueio do React 18)
-    const setupListeners = async () => {
-        unlisten = await listen("splash-status", (event: any) => { setSplashStatus(event.payload as string); setSplashProgress(prev => Math.min(prev + 10, 95)); });
+    const initEverything = async () => {
+        // Trava imediata para evitar dupla inicialização
+        if (didInit.current) return;
+        didInit.current = true;
+
+        // 1. OBRIGA O REACT A REGISTRAR OS OUVINTES PRIMEIRO (AGUARDA CADA UM)
+        unlisten = await listen("splash-status", (event: any) => { 
+            const msg = event.payload as string;
+            setSplashStatus(msg); 
+            setSplashProgress(prev => Math.min(prev + 10, 95)); 
+            if (msg.includes("Nuvem") || msg.includes("Servidor")) setIsUsingLocalDB(false);
+            else if (msg.includes("Banco Local")) setIsUsingLocalDB(true);
+        });        
         unlistenMonitor = await listen("monitoring-status", (event: any) => { setStatusText(event.payload as string); });
         unlistenLoading = await listen("loading-status", (event: any) => { setStatusText(event.payload as string); });
+        
         unlistenCompanies = await listen("companies-ready", () => {
             setAreCompaniesReady(true);
             invoke<string[]>("fetch_companies", { year: new Date().getFullYear() })
@@ -909,91 +1128,75 @@ function App() {
                     setStatusText("Lista de empresas atualizada.");
                     setBgLoading(false); 
                     showToast("Filtro de empresas pronto para uso.", "success");
-                })
-                .catch(console.error);
+                }).catch(console.error);
         });
-    };
-    setupListeners();
 
-    // 2. A CARGA PESADA SÓ RODA UMA VEZ
-    if (!didInit.current) {
-        didInit.current = true;
-        const startSystem = async () => {
-            try {
-                const initialData = await invoke<DashboardData>("perform_initial_load");
-            setSplashProgress(100); setSplashStatus("Carregado."); setData(initialData); setConsolidatedData(initialData); setStatusText("Consolidado.");
-
-            await invoke("finalize_startup"); setTimeout(() => { setIsInitialLoad(false); }, 300);
-            const today = new Date();
-            const yesterday = new Date(today);
-            yesterday.setDate(yesterday.getDate() - 1);
-            const yyyy = yesterday.getFullYear();
-            const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
-            const dd = String(yesterday.getDate()).padStart(2, '0');
-            const targetDateStr = `${yyyy}-${mm}-${dd}`; // Formato: 2026-03-01
-
-            let outdated = [];
-            if (initialData.last_update_ndd && initialData.last_update_ndd !== "N/D" && initialData.last_update_ndd < targetDateStr) outdated.push("NDD Print");
-            if (initialData.last_update_iw && initialData.last_update_iw !== "N/D" && initialData.last_update_iw < targetDateStr) outdated.push("iW Remote");
-            
-            // Salva as datas formatadas para usar na tabela verde/vermelha do Modal
-            setSyncDates({
-                targetISO: targetDateStr,
-                nddISO: initialData.last_update_ndd || "N/D",
-                iwISO: initialData.last_update_iw || "N/D",
-                targetBR: `${dd}/${mm}/${yyyy}`,
-                nddBR: formatDate(initialData.last_update_ndd),
-                iwBR: formatDate(initialData.last_update_iw)
-            });
-
-            if (outdated.length > 0) {
-                setOutdatedText(outdated.join(" e o "));
-                setShowDataWarning(true);
+        unlistenSync = await listen("sync-status", (event: any) => { 
+            const msg = event.payload as string;
+            setSyncProgressText(msg); 
+            if (msg.toLowerCase().includes("baixando")) hasDownloadedRef.current = true;
+            if (msg.includes("100% sincronizado")) {
+                setIsFullySynced(true);
+                setHasSyncFailed(false);
+                if (hasDownloadedRef.current) {
+                    setRefreshTrigger(Date.now());
+                    hasDownloadedRef.current = false;
+                }
             }
-            const currY = new Date().getFullYear();
-            showToast(`Dados de ${currY} prontos.`, 'info');
-            setBgLoading(true); setStatusText("Atualizando histórico antigo...");
-            
-                invoke<DashboardData>("fetch_full_history").then(historyData => {
-                setData(prev => { if (!prev) return historyData; return { ...prev, production: [...prev.production, ...historyData.production], communication: [...prev.communication, ...historyData.communication] }; });
-                setConsolidatedData(prev => { if (!prev) return historyData; return { ...prev, production: [...prev.production, ...historyData.production], communication: [...prev.communication, ...historyData.communication] }; });
-                setStatusText("Histórico completo."); setBgLoading(false);
-                
-                // ---> MELHORIA 3: Alerta de Histórico Pronto
-                showToast("Histórico completo de todos os anos disponível.", "success");
-            }).catch(console.error);
+        });
 
-            invoke<MonitoringData>("fetch_monitoring_data").then(res => {
-                setMonitoringData(res);
-                
-                // Assim que terminar o diagrama, começa a baixar a tabela pesada silenciosamente
-                setIsLoadingSummaries(true);
-                invoke<MonitoringCompanySummary[]>("fetch_monitoring_company_summary")
-                    .then(summaries => {
-                        setCompanySummaries(summaries);
-                        setIsLoadingSummaries(false);
-                        
-                        // ---> MELHORIA 3: Alerta da Aba de Monitoramento Pronta
-                        showToast("Aba de Monitoramento e Oportunidades pronta.", "success");
-                    })
-                    .catch(err => {
-                        console.error("Erro ao pré-carregar tabela de empresas:", err);
-                        setIsLoadingSummaries(false);
-                    });
-            });
+        unlistenFailed = await listen("sync-failed", () => { setHasSyncFailed(true); setShowOfflineWarning(true); });
+        unlistenStartupFailed = await listen("startup-sync-failed", () => { setHasSyncFailed(true); });
+        unlistenChunk = await listen("sync-chunk-done", () => { setRefreshTrigger(Date.now()); });
+
+        // 2. SÓ ACORDA O RUST DEPOIS QUE O REACT ESTIVER 100% PRONTO PARA OUVIR
+        try {
+            const startTime = Date.now();
+            const initialData = await invoke<DashboardData>("perform_initial_load");
+            
+            // Reduzimos o engarrafamento para 1500ms, pois o Rust agora coreografa as mensagens de status!
+            const elapsed = Date.now() - startTime;
+            if (elapsed < 1500) {
+                await new Promise(r => setTimeout(r, 1500 - elapsed));
+            }
+
+            setSplashProgress(100); 
+            setSplashStatus("Carregado."); 
+            setData(initialData); 
+            
+            setCompanyCache({ [`${new Date().getFullYear()}-GERAL`]: initialData });
+            
+            invoke("finalize_startup").catch(console.error); 
+            setTimeout(() => { setIsInitialLoad(false); }, 300);
+            
+            showToast(`Sistema iniciado e pronto para uso.`, 'success');
+
+            invoke<MonitoringData>("fetch_monitoring_data")
+                .then(res => { setMonitoringData(res); })
+                .catch(() => console.log("Diagrama na fila de espera..."));
+
         } catch (err) { 
             console.error("ERRO CRÍTICO:", err); 
-            // ALTERAÇÃO AQUI: Mensagem fixa em vez de 'String(err)'
             setSplashError("Não conectado. Você precisa estar na VPN para se conectar ao banco de dados."); 
         }
     };
-    startSystem();
-  } // <--- ADICIONE ESTA CHAVE AQUI PARA FECHAR O IF!
-  
-  return () => { if(unlisten) unlisten(); if(unlistenMonitor) unlistenMonitor(); if(unlistenLoading) unlistenLoading(); if(unlistenCompanies) unlistenCompanies(); };
-}, []);
 
-  useEffect(() => { if(!isInitialLoad && areCompaniesReady) { invoke<string[]>("fetch_companies", { year: year }).then(setCompanyList); } }, [year, areCompaniesReady, isInitialLoad]);
+    // Executa a sequência orquestrada
+    initEverything();
+        
+    return () => { 
+        if(unlisten) unlisten(); if(unlistenMonitor) unlistenMonitor(); 
+        if(unlistenLoading) unlistenLoading(); if(unlistenSync) unlistenSync(); 
+        if(unlistenCompanies) unlistenCompanies(); if(unlistenFailed) unlistenFailed(); 
+        if(unlistenChunk) unlistenChunk(); if(unlistenStartupFailed) unlistenStartupFailed(); 
+    };
+  }, []);
+
+    useEffect(() => { 
+        if(!isInitialLoad && areCompaniesReady) { 
+            invoke<string[]>("fetch_companies", { year: year }).then(setCompanyList); 
+        } 
+    }, [year, areCompaniesReady, isInitialLoad]);
 
   // --- FUNÇÃO AUXILIAR PARA TRATAR ERROS DE CONEXÃO ---
   const handleApiError = (err: any, retryCallback: () => void) => {
@@ -1005,44 +1208,59 @@ function App() {
       setConnectionError(true); // Abre o modal
   };
 
-const handleFetchData = async (empresa: string) => {
-    // Se limpar o filtro, restaura o consolidado
-    if (!empresa) { 
-        if (consolidatedData) { 
-            setData(consolidatedData); 
-            setStatusText("Visão Consolidada restaurada."); 
-        } 
-        return; 
-    }
+const handleFetchData = async (empresa: string, targetYear: number) => {
+      // MÁGICA: A chave agora é blindada combinando o ANO e a EMPRESA!
+      const cacheKey = `${targetYear}-${empresa || "GERAL"}`;
 
-    // Se já tiver o Dashboard no cache, usa ele
-    if (companyCache[empresa]) { 
-        setData(companyCache[empresa]); 
-        setStatusText(`Filtro: ${empresa} (Cache)`); 
-        // A linha do prefetchPanelData que ficava aqui foi removida!
-        return; 
-    }
-    
-    setIsLoadingData(true); 
-    setLoadingMsg("Preparando filtro..."); 
-    setStatusText("Filtrando...");
-    
-    const unlisten = await listen("splash-status", (event: any) => setLoadingMsg(event.payload as string));
-    
-    invoke<DashboardData>("fetch_dashboard_data", { company: empresa, year: year })
-        .then(res => { 
-            setData(res); 
-            setCompanyCache(prev => ({ ...prev, [empresa]: res })); 
-            setIsLoadingData(false); // Libera a UI primeiro
-            
-            // A linha do prefetchPanelData que dava erro aqui também foi removida!
-        })
-        .catch(err => handleApiError(err, () => handleFetchData(empresa)))
-        .finally(() => { unlisten(); });
-};
+      // Se já tiver no cache da memória, mostra IMEDIATAMENTE (zero espera)
+      if (companyCache[cacheKey]) { 
+          setData(companyCache[cacheKey]); 
+          setStatusText(`Filtro: ${empresa ? empresa : "Consolidado"} (Cache)`); 
+          return; 
+      }
+      
+      setIsLoadingData(true); 
+      setLoadingMsg(empresa ? "Preparando filtro..." : "Restaurando visão consolidada..."); 
+      setStatusText(empresa ? "Filtrando..." : "Restaurando...");
+      
+      const unlisten = await listen("splash-status", (event: any) => setLoadingMsg(event.payload as string));
+      const args: any = { year: targetYear };
+      if (empresa) args.company = empresa;
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { const val = e.target.value; setTempCompany(val); const match = companyList.find(c => c.toLowerCase() === val.toLowerCase()); if (match && match !== selectedCompany) { setSelectedCompany(match); handleFetchData(match); } else if (val === "") { setTempCompany(""); setSelectedCompany(""); handleFetchData(""); } };
-  const clearCompanyFilter = () => { setTempCompany(""); setSelectedCompany(""); handleFetchData(""); };
+      invoke<DashboardData>("fetch_dashboard_data", args)
+          .then(res => { 
+              setData(res); 
+              // SALVA O RESULTADO NA "GAVETA" DA MEMÓRIA
+              setCompanyCache(prev => ({ ...prev, [cacheKey]: res })); 
+              setStatusText(empresa ? `Visualizando: ${empresa}` : "Visão Consolidada restaurada.");
+              setIsLoadingData(false); 
+          })
+          .catch(err => handleApiError(err, () => handleFetchData(empresa, targetYear)))
+          .finally(() => { unlisten(); });
+  };
+
+  // NOVO: O React escuta a mudança de ano no menu e atualiza os gráficos sozinho!
+  useEffect(() => {
+      if (!isInitialLoad) {
+          handleFetchData(selectedCompany, year);
+      }
+  }, [year]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setTempCompany(val); 
+      // Se ele digitar ou clicar num item da lista oficial, faz a busca na hora!
+      if (companyList.includes(val)) {
+          setSelectedCompany(val);
+          handleFetchData(val, year);
+      }
+  };
+
+  const clearCompanyFilter = () => { 
+      setTempCompany(""); 
+      setSelectedCompany(""); 
+      handleFetchData("", year); 
+  };
 
 const loadPanelData = (monthIndex: number, yearOverride?: number) => {
       setPanelLoading(true);
@@ -1205,30 +1423,52 @@ const changePanelMonth = (delta: number) => {
     return grouped.slice(1);
   }, [data, currentView, year, source]);
 
-  const footerStats = useMemo(() => { if (!data) return { companies: 0, equipments: 0 }; if (selectedCompany) { return { companies: 1, equipments: data.total_equipments }; } if (currentView === 'monitoring' && monitoringData) { return { companies: data.total_companies, equipments: monitoringData.mif }; } const maxEquipments = chartData.reduce((max, curr) => { const devs = currentView.startsWith('production') ? curr.devices : curr.total_devs; return devs > max ? devs : max; }, 0); return { companies: companyList.length, equipments: maxEquipments }; }, [data, monitoringData, currentView, chartData, companyList, selectedCompany]);
-  const formatYAxis = (val: number) => currentView === 'communication' ? `${(val * 100).toFixed(0)}%` : `${(val/1000000).toFixed(1)}M`;
-
+// RECRIA O TEXTO AZUL DO RODAPÉ QUE HAVIA SUMIDO
   const activeContext = useMemo(() => {
-      if (currentView === 'monitoring') return "Painel: Monitoramento (MIF)";
-      const aba = currentView === 'communication' ? "Comunicação" : currentView === 'production_compare' ? "Ano a Ano" : "Produção";
-      const visao = selectedCompany ? `Empresa: ${selectedCompany}` : "Visão Consolidada";
-      const fonteInfo = source !== "Consolidado" ? ` [${source}]` : "";
-      return `Visualizando: ${aba} ➔ ${visao} (${year})${fonteInfo}`;
-  }, [currentView, selectedCompany, year, source]);
+      const viewName = currentView === 'production_current' ? 'Produção' : 
+                       currentView === 'production_compare' ? 'Ano a Ano' : 
+                       currentView === 'communication' ? 'Comunicação' : 'Monitoramento';
+      const detail = selectedCompany ? selectedCompany : `Visão ${source} (${year})`;
+      return `Visualizando: ${viewName} ➔ ${detail}`;
+  }, [currentView, selectedCompany, source, year]);
 
-  // Limpa logs estáticos após 6 segundos para manter o rodapé limpo, mantendo apenas o contexto azul
-  useEffect(() => {
-      const isStaticLog = statusText && 
-                          !bgLoading && 
-                          !statusText.includes("Baixando") && 
-                          !statusText.includes("Filtrando") && 
-                          !statusText.includes("Verificando");
-                          
-      if (isStaticLog) {
-          const timer = setTimeout(() => setStatusText(""), 6000);
-          return () => clearTimeout(timer);
+const footerStats = useMemo(() => { 
+      if (!data) return { companies: 0, equipments: 0 }; 
+
+      // Na aba de Monitoramento (MIF), o total é o MIF global
+      if (currentView === 'monitoring' && monitoringData) { 
+          return { companies: data.total_companies, equipments: monitoringData.mif }; 
+      } 
+
+      const totalCompanies = selectedCompany ? 1 : companyList.length;
+
+      // 1. Filtra a fonte atual selecionada no topo (Consolidado, NDD ou iW)
+      const filterFn = (d: { source: string }) => { 
+          if (source === "Consolidado") return true; 
+          if (source === "NDD") return d.source === "NDD"; 
+          if (source === "iW") return d.source === "IW"; 
+          return false; 
+      };
+
+      // 2. Pega os dados de comunicação apenas do ano escolhido e aplica o filtro de fonte
+      const commData = data.communication
+          .filter(c => c.ano === year)
+          .filter(filterFn);
+
+      let snapshotEquipments = 0;
+      
+      if (commData.length > 0) {
+          // 3. Descobre qual foi o último mês que o robô baixou para esse ano
+          const lastMonth = Math.max(...commData.map(c => c.mes));
+          
+          // 4. Soma os equipamentos (Conectados + Desconectados) do último mês
+          snapshotEquipments = commData
+              .filter(c => c.mes === lastMonth)
+              .reduce((acc, curr) => acc + curr.connected + curr.disconnected, 0);
       }
-  }, [statusText, bgLoading]);
+
+      return { companies: totalCompanies, equipments: snapshotEquipments };
+  }, [data, monitoringData, currentView, companyList, selectedCompany, year, source]);
 
 // ---> INÍCIO DA NOVA FUNCIONALIDADE: COMPARATIVO SEMANAL REAL E HÍBRIDO
   const [showWeeklyModal, setShowWeeklyModal] = useState(false);
@@ -1377,7 +1617,11 @@ const changePanelMonth = (delta: number) => {
             </div>
           )}
           
-          <div className="splash-version">v1.1.7</div>
+            <div className="splash-version" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              v2.0.0 <span style={{ color: '#455A64' }}>|</span> 
+              Fonte de Dados: {isUsingLocalDB ? 'Banco Local' : 'Nuvem'} 
+              {isUsingLocalDB && !syncProgressText ? <HardDrive size={12} /> : <Cloud size={12} />}
+          </div>
         </div>
       )}
       {isLoadingData && !isInitialLoad && ( <div className="loading-modal-overlay"> <div className="loading-box"> <div className="loading-spinner"></div> <div className="loading-text">{loadingMsg}</div> </div> </div> )}
@@ -1453,38 +1697,168 @@ const changePanelMonth = (delta: number) => {
         </div>
       )}
 
+      {/* --- MODAL DE MODO OFFLINE --- */}
+      {showOfflineWarning && (
+        <div className="about-overlay" onClick={() => setShowOfflineWarning(false)} style={{ zIndex: 10000 }}>
+            <div className="about-box" style={{ width: '480px', borderTop: '4px solid #FFD740', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
+                <h2 className="about-title" style={{ color: '#FFD740', marginBottom: 15, flexShrink: 0 }}>Modo Offline (Sem VPN)</h2>
+                
+                <div className="about-content" style={{ overflowY: 'auto', paddingRight: '5px', flex: 1 }}>
+                    <p style={{ textAlign: 'justify', marginBottom: '15px' }}>
+                        O sistema tentou se conectar à nuvem para buscar novos dados, mas a conexão falhou. <strong>Verifique se você está conectado à VPN.</strong>
+                    </p>
+
+                    <div style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid #455A64', borderRadius: '6px', padding: '15px', marginBottom: '15px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid #37474F', paddingBottom: '4px' }}>
+                            <span style={{ color: '#B0BEC5', fontWeight: 'bold' }}>Dados em Cache Disponíveis até:</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <span style={{ color: '#B0BEC5' }}>Produção NDD Print:</span>
+                            <span style={{ color: '#00E5FF', fontWeight: 'bold' }}>{syncDates.nddBR}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#B0BEC5' }}>MIF e iW Remote:</span>
+                            <span style={{ color: '#00E5FF', fontWeight: 'bold' }}>{syncDates.iwBR}</span>
+                        </div>
+                    </div>
+
+                    <p style={{ textAlign: 'justify', marginBottom: '15px', color: '#B0BEC5', fontSize: '11px' }}>
+                        Você pode usar o painel com os dados locais normalmente. Assim que conectar à VPN, clique no ícone de <strong>Atualizar</strong> no rodapé para tentar novamente.
+                    </p>
+                </div>
+
+                <button 
+                    className="btn-close-about" 
+                    onClick={() => setShowOfflineWarning(false)} 
+                    style={{ background: 'transparent', color: '#FFD740', border: '1px solid #FFD740', fontWeight: 'bold', width: '100%', marginTop: '15px', flexShrink: 0, transition: 'all 0.2s ease' }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = '#FFD740'; e.currentTarget.style.color = '#000'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#FFD740'; }}
+                >
+                    ESTOU CIENTE
+                </button>
+            </div>
+        </div>
+      )}
+
+      {/* --- MODAL DE SISTEMA ATUALIZADO --- */}
+      {showNoUpdateModal && (
+        <div className="about-overlay" onClick={() => setShowNoUpdateModal(false)} style={{ zIndex: 10000 }}>
+            <div className="about-box" style={{ width: '400px', borderTop: '4px solid #00E676' }} onClick={e => e.stopPropagation()}>
+                <h2 className="about-title" style={{ color: '#00E676', marginBottom: 15 }}>Sistema Atualizado</h2>
+                
+                <div className="about-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    
+                    {/* ANIMAÇÃO DE SUCESSO PROFISSIONAL */}
+                    <div style={{ position: 'relative', width: '64px', height: '64px', marginTop: '20px', marginBottom: '25px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <style>
+                            {`
+                                @keyframes popInCheck {
+                                    0% { transform: scale(0); opacity: 0; }
+                                    60% { transform: scale(1.2); opacity: 1; }
+                                    100% { transform: scale(1); opacity: 1; }
+                                }
+                                @keyframes pulseSuccess {
+                                    0% { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.3); }
+                                    70% { box-shadow: 0 0 0 15px rgba(0, 230, 118, 0); }
+                                    100% { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); }
+                                }
+                                .animated-check-icon {
+                                    animation: popInCheck 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+                                    z-index: 2;
+                                }
+                                .animated-check-bg {
+                                    position: absolute;
+                                    width: 100%;
+                                    height: 100%;
+                                    border-radius: 50%;
+                                    background: rgba(0, 230, 118, 0.1);
+                                    animation: pulseSuccess 2s infinite;
+                                    z-index: 1;
+                                }
+                            `}
+                        </style>
+                        <div className="animated-check-bg"></div>
+                        <div className="animated-check-icon" style={{ color: '#00E676', display: 'flex' }}>
+                            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                            </svg>
+                        </div>
+                    </div>
+                    {/* FIM DA ANIMAÇÃO */}
+
+                    <p style={{ textAlign: 'center', marginBottom: '15px', color: '#B0BEC5' }}>
+                        Não há novos dados disponíveis na nuvem neste momento. Seu painel já está com as informações mais recentes!
+                    </p>
+                </div>
+
+                <button 
+                    className="btn-close-about" 
+                    onClick={() => setShowNoUpdateModal(false)} 
+                    style={{ background: 'transparent', color: '#00E676', border: '1px solid #00E676', fontWeight: 'bold', width: '100%', marginTop: '10px', transition: 'all 0.2s ease' }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = '#00E676'; e.currentTarget.style.color = '#000'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#00E676'; }}
+                >
+                    OK
+                </button>
+            </div>
+        </div>
+      )}
+
       {/* --- MODAL: O QUE HÁ DE NOVO --- */}
       {showWhatsNew && (
         <div className="about-overlay" onClick={() => setShowWhatsNew(false)} style={{ zIndex: 10000 }}>
-            <div className="about-box" style={{ width: '550px', borderTop: '4px solid #00E676' }} onClick={e => e.stopPropagation()}>
-                <h2 className="about-title" style={{ color: '#00E676', marginBottom: '5px' }}>🚀 Novidades da Versão {APP_VERSION}</h2>
-                <p style={{ fontSize: '12px', color: '#B0BEC5', marginBottom: '20px' }}>Veja o que acabou de chegar no Monitoramento RPA</p>
+            <div className="about-box" style={{ width: '580px', borderTop: '4px solid #00E5FF' }} onClick={e => e.stopPropagation()}>
+                <h2 className="about-title" style={{ color: '#00E5FF', marginBottom: '5px' }}>🚀 A Grande Atualização 2.0</h2>
+                <p style={{ fontSize: '12px', color: '#B0BEC5', marginBottom: '20px' }}>Veja por que o Monitoramento RPA está mais rápido do que nunca</p>
 
                 <div className="about-content" style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '10px' }}>
-                    <div style={{ marginBottom: '18px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #00E5FF' }}>
-                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>📈 Previsões Semanais Híbridas</h4>
+                    
+                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #00E676' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>⚡ Desempenho na Velocidade da Luz</h4>
                         <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
-                            Novo acompanhamento da evolução da produção acumulada aos domingos. A linha se funde magicamente do "Real" (azul) para a "Estimativa" (tracejado amarelo) no exato dia em que os dados consolidados terminam!
+                            Esqueça as telas de carregamento demoradas. Agora o sistema possui um <strong>banco de dados local</strong>. Mudar de ano, filtrar empresas e abrir os painéis agora acontece de forma <strong>instantânea</strong>.
                         </p>
                     </div>
 
-                    <div style={{ marginBottom: '18px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #FFD740' }}>
-                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>⚡ Cache Diário Instantâneo</h4>
+                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #FFD740' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🤖 Robô de Sincronização Invisível</h4>
                         <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
-                            O sistema agora baixa e armazena os dados agrupados por dia silenciosamente em segundo plano. Ao clicar no botão de previsões, o gráfico abre em milissegundos, sem telas de espera.
+                            O aplicativo não trava mais enquanto baixa dados. Um robô silencioso trabalha no rodapé baixando as atualizações. Quando ele termina, <strong>seus gráficos piscam e se atualizam sozinhos</strong>!
                         </p>
                     </div>
 
-                    <div style={{ marginBottom: '10px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #EF5350' }}>
-                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🎯 Status de Sincronização Inteligente</h4>
+                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #00E5FF' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🔌 Modo Offline (Sem VPN)</h4>
                         <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
-                            O novo modal de aviso verifica milimetricamente se os dados do iW e do NDD fecharam em relação a ontem (D-1), indicando visualmente (verde ou vermelho) a exata fonte que atrasou a integração de dados.
+                            Está sem internet ou esqueceu a VPN desligada? Sem problemas! O <strong>Modo Offline</strong> permite que você continue analisando e explorando todos os dados do seu último acesso perfeitamente.
                         </p>
                     </div>
+
+                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #E040FB' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>📈 Novas Previsões Semanais</h4>
+                        <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
+                            Adicionamos um novo relatório interativo. Clique no botão <strong>Previsões Semanais</strong> na tela inicial para acompanhar o fechamento do mês dia a dia, comparando a meta com o mês anterior.
+                        </p>
+                    </div>
+
+                    <div style={{ marginBottom: '10px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #FF5252' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🧠 Cérebro Híbrido Autocurável</h4>
+                        <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
+                            No seu primeiro acesso, para você não ficar esperando, o sistema costura os dados da Nuvem com os dados do seu computador. Os gráficos nunca ficam vazios enquanto o aplicativo se constrói!
+                        </p>
+                    </div>
+
                 </div>
 
-                <button className="btn-close-about" onClick={() => setShowWhatsNew(false)} style={{ marginTop: '20px', width: '100%', background: '#00E676', color: '#000', fontWeight: 'bold' }}>
-                    Explorar o Sistema
+                <button 
+                    className="btn-close-about" 
+                    onClick={() => setShowWhatsNew(false)} 
+                    style={{ marginTop: '20px', width: '100%', background: 'transparent', color: '#00E5FF', fontWeight: 'bold', border: '1px solid #00E5FF', transition: 'all 0.2s ease' }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = '#00E5FF'; e.currentTarget.style.color = '#000'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#00E5FF'; }}
+                >
+                    Voltar para o sistema
                 </button>
             </div>
         </div>
@@ -1495,7 +1869,7 @@ const changePanelMonth = (delta: number) => {
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
             <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
-                <p className="about-version">Versão 1.1.7</p>
+                <p className="about-version">Versão 2.0.0</p>
                 
                 <div className="about-content">
                     <p style={{textAlign: 'justify', marginBottom: '15px'}}>
@@ -1728,13 +2102,12 @@ const changePanelMonth = (delta: number) => {
                                         <ReferenceLine x={weeklyData.diasRealParaEsteMes} stroke="#B0BEC5" strokeWidth={2} strokeDasharray="3 3" label={<RenderVerticalLineLabel weeklySource={source} nddDate={formatDate(data?.last_update_ndd)} iwDate={formatDate(data?.last_update_iw)} />} />
                                     )}
 
-                                    {/* As Tags do Gráfico */}
-                                    <Line name="Mês Anterior" type="monotone" dataKey="real_prev" stroke="#546E7A" strokeWidth={3} dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 6 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="real_prev" color="#90A4AE" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} />} />
+                                    {/* As Tags do Gráfico com o parâmetro allPoints */}
+                                    <Line name="Mês Anterior" type="monotone" dataKey="real_prev" stroke="#546E7A" strokeWidth={3} dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 6 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="real_prev" color="#90A4AE" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} allPoints={weeklyData.points} />} />
                                     
-                                    <Line name="Real" type="monotone" dataKey="real_curr" stroke="#00E5FF" strokeWidth={4} dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 7 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="real_curr" color="#00E5FF" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} />} />
+                                    <Line name="Real" type="monotone" dataKey="real_curr" stroke="#00E5FF" strokeWidth={4} dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 7 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="real_curr" color="#00E5FF" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} allPoints={weeklyData.points} />} />
                                     
-                                    <Line name="Estimativa" type="monotone" dataKey="est_curr" stroke="#FFD740" strokeWidth={3} strokeDasharray="6 4" dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 5 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="est_curr" color="#FFD740" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} />} legendType="none" />
-                                </LineChart> 
+                                    <Line name="Estimativa" type="monotone" dataKey="est_curr" stroke="#FFD740" strokeWidth={3} strokeDasharray="6 4" dot={(props) => <RenderCustomDot {...props} sundays={weeklyData.sundays} />} activeDot={{ r: 5 }} label={(props) => <RenderWeeklyLabel {...props} sundays={weeklyData.sundays} lineKey="est_curr" color="#FFD740" currentDay={weeklyData.diasRealParaEsteMes} isCurrentOngoingMonth={weeklyData.isCurrentOngoingMonth} totalDiasMes={weeklyData.totalDiasMes} allPoints={weeklyData.points} />} legendType="none" />                                </LineChart> 
                             </ResponsiveContainer>
                         </div>
                         </div> {/* <--- NOVO FECHAMENTO AQUI! */}
@@ -1830,14 +2203,14 @@ const changePanelMonth = (delta: number) => {
         </header>
 
         <div className="chart-frame">
-                            {currentView === 'monitoring' ? ( 
-                    <MonitoringView 
-                        data={monitoringData} 
-                        dashboardData={data} 
-                        companySummaries={companySummaries}
-                        isLoadingSummaries={isLoadingSummaries}
-                    /> 
-                ) : (
+            {currentView === 'monitoring' ? ( 
+                <MonitoringView 
+                    data={monitoringData} 
+                    dashboardData={data} 
+                    companySummaries={companySummaries}
+                    isLoadingSummaries={isLoadingSummaries}
+                /> 
+            ) : (
                 <ResponsiveContainer width="100%" height="100%">
                     {currentView === 'production_compare' ? (
                         <BarChart data={chartData} onClick={handleBarClick} style={{cursor:'pointer'}} barGap={2} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
@@ -1857,7 +2230,7 @@ const changePanelMonth = (delta: number) => {
                                 <Bar dataKey="total_gap" stackId="curr_year" fill="#00E5FF" opacity={0.6} stroke="#fff" strokeDasharray="3 3" radius={[3, 3, 0, 0]} label={(props) => <RenderCompProjLabel {...props} />} style={{pointerEvents: 'none'}} legendType="none" />
                         </BarChart>
                     ) : (
-<BarChart data={chartData} onClick={handleBarClick} style={{cursor:'pointer'}} stackOffset={currentView === 'communication' ? 'expand' : 'none'} margin={{top: 20, right: 30, left: 50, bottom: 5}}>
+                        <BarChart data={chartData} onClick={handleBarClick} style={{cursor:'pointer'}} stackOffset={currentView === 'communication' ? 'expand' : 'none'} margin={{top: 20, right: 30, left: 50, bottom: 5}}>
                             <defs><pattern id="stripe" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)"><line x1="0" y="0" x2="0" y2="8" stroke="#FFFFFF" strokeWidth="2" opacity="0.3" /></pattern><mask id="stripe-mask"><rect x="0" y="0" width="100%" height="100%" fill="white" /><rect x="0" y="0" width="100%" height="100%" fill="url(#stripe)" /></mask></defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="#37474F" vertical={false} />
                             <XAxis dataKey="name" stroke="#B0BEC5" tick={{fontSize: 12}} />
@@ -1927,40 +2300,87 @@ const changePanelMonth = (delta: number) => {
                     <span>iW:</span> <b>{formatDate(data?.last_update_iw)}</b>
                 </div>
             </div>
-<div className="footer-right" style={{ display: 'flex', alignItems: 'center' }}>
+            <div className="footer-right" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              
+              {/* ESTATÍSTICAS */}
               {currentView !== 'monitoring' && <>
-                  <span className="footer-stat" title="Total de empresas ativas no ano selecionado">Empresas no Ano: <b>{footerStats.companies.toLocaleString()}</b></span>
+                  <span className="footer-stat" title="Total de empresas ativas no ano selecionado">Empresas: <b>{footerStats.companies.toLocaleString()}</b></span>
                   <span className="separator">|</span>
-                  <span className="footer-stat">Equipamentos: <b>{footerStats.equipments.toLocaleString()}</b></span>
-                  <span className="separator">|</span>
+                  <span className="footer-stat">Eqp: <b>{footerStats.equipments.toLocaleString()}</b></span>
               </>}
-              
-              {/* --- NOVO BLOCO: Textos fluidos de Ação e Sistema --- */}
-              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-end', minHeight: '30px', marginRight: '5px' }}>
+
+              {/* BLOCO FINAL: TEXTOS E ÍCONES EMPILHADOS */}
+              <div style={{ display: 'flex', alignItems: 'center', borderLeft: '1px solid #455A64', paddingLeft: '15px', marginLeft: '5px' }}>
                   
-                  {/* Mensagem do Usuário (Alinhamento normal, ou empurrada pra cima se houver log de sistema) */}
-                  <span style={{ color: '#00E5FF', fontSize: '11px', lineHeight: '1.2' }}>
-                      {activeContext}
-                  </span>
-                  
-                  {/* Mensagem do Sistema (Amarela, aparece embutida logo abaixo) */}
-                  {statusText && !statusText.startsWith("Visualizando") && statusText !== "Consolidado." && (
-                      <div style={{ display: 'flex', alignItems: 'center', marginTop: '2px' }}>
-                          {(bgLoading || !areCompaniesReady || statusText.includes("Baixando") || statusText.includes("Filtrando") || statusText.includes("Verificando")) && (
-                              <span className="footer-spinner" style={{ marginRight: '5px', width: '10px', height: '10px', borderWidth: '2px' }}></span>
+                  {/* COLUNA DE TEXTOS (Alinhados à direita) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', marginRight: '10px', minWidth: '220px' }}>
+                      
+                      {/* LINHA DE CIMA: Onde o usuário está navegando (Azul) */}
+                      <span style={{ color: '#00E5FF', fontSize: '11px', marginBottom: '4px' }}>
+                          {activeContext}
+                      </span>
+                      
+                      {/* LINHA DE BAIXO: Processos em Background (Amarelo SEM negrito) */}
+                      <div style={{ display: 'flex', alignItems: 'center', height: '14px', position: 'relative', width: '100%', justifyContent: 'flex-end' }}>
+                          {hasSyncFailed && !syncProgressText && !bgLoading ? (
+                              <span style={{ color: '#FFD740', fontSize: '11px', fontStyle: 'italic', opacity: 0.9 }}>
+                                  Clique para atualizar ➔
+                              </span>
+                          ) : syncProgressText ? (
+                              <span style={{ color: '#FFD740', fontSize: '11px', fontWeight: 'normal', display: 'flex', alignItems: 'center', margin: 0 }}>
+                                  <span className="footer-spinner" style={{ marginRight: '5px', width: '10px', height: '10px', borderWidth: '2px', borderColor: 'rgba(255, 215, 64, 0.2)', borderTopColor: '#FFD740' }}></span>
+                                  {syncProgressText}
+                              </span>
+                          ) : statusText && !statusText.startsWith("Visualizando") && statusText !== "Consolidado." && (
+                              <span style={{ color: '#90A4AE', fontSize: '11px', display: 'flex', alignItems: 'center', margin: 0, fontWeight: 'normal' }}>
+                                  {bgLoading && <span className="footer-spinner" style={{ marginRight: '5px', width: '10px', height: '10px', borderWidth: '2px', borderColor: 'rgba(144, 164, 174, 0.2)', borderTopColor: '#90A4AE' }}></span>}
+                                  {statusText}
+                              </span>
                           )}
-                          <span style={{ color: '#FFD740', fontStyle: 'italic', fontSize: '10px', lineHeight: '1.2', margin: 0 }}>
-                              {statusText}
-                          </span>
                       </div>
-                  )}
+                  </div>
+
+                  {/* COLUNA DE ÍCONES (Empilhados) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      {/* Info em cima */}
+                      <button className="about-icon-btn" onClick={() => setShowAbout(true)} title="Sobre o Sistema" style={{ margin: 0, padding: 0 }}>
+                          <Info size={14} />
+                      </button>
+                      
+                      {/* Lógica Dinâmica dos Ícones do Rodapé */}
+                      {(() => {
+                          const txtSync = (syncProgressText || "").toLowerCase();
+                          const txtStatus = (statusText || "").toLowerCase();
+                          
+                          // MÁGICA: Retiramos o "analisando parque" da verificação de Nuvem!
+                          const isWorking = bgLoading || 
+                              (txtSync !== "" && !txtSync.includes("falha") && !txtSync.includes("offline") && !txtSync.includes("100% sincronizado") && !txtSync.includes("atualizado")) || 
+                              txtStatus.includes("nuvem") || txtStatus.includes("servidor") || txtStatus.includes("atualizando estatísticas");
+
+                          if (isWorking) {
+                              return (
+                                  <div title="Trabalhando em segundo plano (Nuvem)..." className="network-active" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'default' }}>
+                                      <Cloud size={14} />
+                                  </div>
+                              );
+                          }
+
+                          return (
+                              <div 
+                                  title={hasSyncFailed ? "Falha na sincronização. Clique para tentar novamente." : "Verificar novas atualizações na Nuvem"}
+                                  // FIXO NA COR DO ÍCONE DE SOBRE (#546E7A)
+                                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#546E7A', transition: 'all 0.2s ease', opacity: 1 }}
+                                  onClick={handleManualSync}
+                                  // HOVER: Fica amarelo independente do estado de erro
+                                  onMouseOver={(e) => { e.currentTarget.style.color = '#FFD740'; }}
+                                  onMouseOut={(e) => { e.currentTarget.style.color = '#546E7A'; }}
+                              >
+                                  <RefreshCw size={14} />
+                              </div>
+                          );
+                      })()}
+                  </div>
               </div>
-              {/* --------------------------------------------------- */}
-              
-              {/* --- ÍCONE DISCRETO DO SOBRE --- */}
-              <button className="about-icon-btn" onClick={() => setShowAbout(true)} title="Sobre o Sistema" style={{ marginLeft: '5px' }}>
-                  <Info size={16} />
-              </button>
           </div>
             </footer>
       </div>

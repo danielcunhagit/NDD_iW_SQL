@@ -7,7 +7,7 @@ pub struct ProductionRecord {
     pub mes: i32,
     pub pb: i64,
     pub cor: i64,
-    pub devices: i32,
+    pub devices: i64, // CORRIGIDO: i64 para evitar panic de memória
 }
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
@@ -15,11 +15,11 @@ pub struct CommunicationRecord {
     pub source: String,
     pub ano: i32,
     pub mes: i32,
-    pub connected: i32,
-    pub disconnected: i32,
+    pub connected: i64, // CORRIGIDO: i64
+    pub disconnected: i64, // CORRIGIDO: i64
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DashboardData {
     pub production: Vec<ProductionRecord>,
     pub communication: Vec<CommunicationRecord>,
@@ -30,7 +30,7 @@ pub struct DashboardData {
     pub total_companies: i64,
 }
 
-#[derive(Debug, Serialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct ProjectionData {
     pub ndd_pb: i64,
     pub ndd_cor: i64,
@@ -38,7 +38,7 @@ pub struct ProjectionData {
     pub iw_cor: i64,
 }
 
-#[derive(Debug, Serialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct MonitoringData {
     pub mif: i64,
     pub compatible: i64,
@@ -54,16 +54,6 @@ pub struct MonitoringData {
     pub last_date: String,
 }
 
-#[derive(sqlx::FromRow)]
-pub struct IwRawData {
-    pub serial: String,
-    pub compativel: Option<String>,
-    pub cadastrado: Option<String>,
-    pub possivel: Option<String>,
-    pub status: Option<String>,
-}
-
-// Detalhes Individuais (Quando filtra uma empresa)
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct DeviceDetail {
     pub source: String,
@@ -74,13 +64,12 @@ pub struct DeviceDetail {
     pub total: i64,
 }
 
-// Resumo por Empresa (Visão Geral - Req 4 e 5)
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct CompanySummary {
     pub source: String,
     pub empresa: String,
-    pub online: i32,  // <= 7 dias
-    pub offline: i32, // > 7 dias
+    pub online: i64,  // CORRIGIDO: i64
+    pub offline: i64, // CORRIGIDO: i64
     pub producao: i64,
 }
 

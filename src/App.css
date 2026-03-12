@@ -778,3 +778,61 @@ footer {
   transform: scale(1.02);
   transition: all 0.2s;
 }
+
+/* --- ANIMAÇÕES DE TRÁFEGO DE REDE (IMERSÃO PROFISSIONAL) --- */
+@keyframes network-chaos {
+  /* 0 a 10%: Rajada muito rápida de pacotes pequenos */
+  0%   { filter: drop-shadow(0 0 3px #FFD740); color: #FFD740; opacity: 1; }
+  2%   { filter: none; color: #B0BEC5; opacity: 0.3; }
+  4%   { filter: drop-shadow(0 0 6px #FFD740); color: #FFD740; opacity: 1; }
+  6%   { filter: none; color: #B0BEC5; opacity: 0.3; }
+  8%   { filter: drop-shadow(0 0 4px #FFD740); color: #FFD740; opacity: 0.8; }
+  10%  { filter: none; color: #B0BEC5; opacity: 0.3; }
+
+  /* 11 a 20%: Pausa (Simulando processamento / CPU) */
+  11%  { filter: none; color: #B0BEC5; opacity: 0.1; }
+  20%  { filter: none; color: #B0BEC5; opacity: 0.1; }
+
+  /* 21 a 32%: Tráfego pesado e contínuo (Download de lote) */
+  21%  { filter: drop-shadow(0 0 8px #FFD740); color: #FFD740; opacity: 1; }
+  26%  { filter: drop-shadow(0 0 4px #FFD740); color: #FFD740; opacity: 0.8; }
+  30%  { filter: drop-shadow(0 0 8px #FFD740); color: #FFD740; opacity: 1; }
+  32%  { filter: none; color: #B0BEC5; opacity: 0.3; }
+
+  /* 33 a 46%: Tráfego médio arritmico */
+  36%  { filter: drop-shadow(0 0 3px #FFD740); color: #FFD740; opacity: 0.7; }
+  38%  { filter: none; color: #B0BEC5; opacity: 0.3; }
+  42%  { filter: drop-shadow(0 0 7px #FFD740); color: #FFD740; opacity: 1; }
+  46%  { filter: none; color: #B0BEC5; opacity: 0.3; }
+
+  /* 47 a 65%: Apagão longo (Gravando no disco SQLite) */
+  47%  { filter: none; color: #B0BEC5; opacity: 0.1; }
+  65%  { filter: none; color: #B0BEC5; opacity: 0.1; }
+
+  /* 66 a 72%: Micro-rajada super agressiva */
+  66%  { filter: drop-shadow(0 0 7px #FFD740); color: #FFD740; opacity: 1; }
+  67%  { filter: none; color: #B0BEC5; opacity: 0.2; }
+  68%  { filter: drop-shadow(0 0 7px #FFD740); color: #FFD740; opacity: 1; }
+  69%  { filter: none; color: #B0BEC5; opacity: 0.2; }
+  70%  { filter: drop-shadow(0 0 7px #FFD740); color: #FFD740; opacity: 1; }
+  72%  { filter: none; color: #B0BEC5; opacity: 0.2; }
+
+  /* 75 a 100%: Fim de ciclo com picos isolados */
+  75%  { filter: drop-shadow(0 0 3px #FFD740); color: #FFD740; opacity: 0.5; }
+  80%  { filter: none; color: #B0BEC5; opacity: 0.3; }
+  85%  { filter: drop-shadow(0 0 5px #FFD740); color: #FFD740; opacity: 0.6; }
+  90%  { filter: none; color: #B0BEC5; opacity: 0.3; }
+  95%  { filter: drop-shadow(0 0 8px #FFD740); color: #FFD740; opacity: 1; }
+  98%  { filter: none; color: #B0BEC5; opacity: 0.3; }
+  100% { filter: drop-shadow(0 0 2px #FFD740); color: #FFD740; opacity: 1; }
+}
+
+.network-active {
+  /* Linha do tempo esticada para 4.5 segundos antes de repetir */
+  animation: network-chaos 4.5s linear infinite;
+}
+
+.network-idle {
+  color: #546E7A;
+  transition: color 0.5s;
+}
