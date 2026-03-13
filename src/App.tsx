@@ -795,17 +795,21 @@ function App() {
                       setData(geralData);
                   }
                   
-                  // CORREÇÃO: Não apaga o cache antigo! Apenas adiciona/atualiza as chaves do ano atual.
+                  // CORREÇÃO: Atualiza os dados consolidados independentemente do ano selecionado.
                   setCompanyCache(prev => {
                       const updatedCache = { ...prev };
-                      updatedCache[`${year}-GERAL`] = geralData;
+                      updatedCache["GERAL"] = geralData;
                       if (selectedCompany && compData) {
-                          updatedCache[`${year}-${selectedCompany}`] = compData;
+                          updatedCache[selectedCompany] = compData;
                       }
                       return updatedCache;
                   });
+
+                  // ---> CORREÇÃO: Libera a avaliação de datas SÓ AQUI, com os dados novos já em memória!
+                  setIsFullySynced(true);
               } catch (err) {
                   console.error(err);
+                  setIsFullySynced(true); // Libera mesmo com erro para não travar
               }
           };
           updateCacheSilently();
@@ -1136,17 +1140,29 @@ function App() {
             setSyncProgressText(msg); 
             if (msg.toLowerCase().includes("baixando")) hasDownloadedRef.current = true;
             if (msg.includes("100% sincronizado")) {
-                setIsFullySynced(true);
                 setHasSyncFailed(false);
                 if (hasDownloadedRef.current) {
+                    // Tem dados novos! Dispara a busca (o isFullySynced será acionado lá dentro).
                     setRefreshTrigger(Date.now());
                     hasDownloadedRef.current = false;
+                } else {
+                    // Não baixou nada novo (estava apenas checando). Pode liberar a avaliação direto.
+                    setIsFullySynced(true);
                 }
             }
         });
 
-        unlistenFailed = await listen("sync-failed", () => { setHasSyncFailed(true); setShowOfflineWarning(true); });
-        unlistenStartupFailed = await listen("startup-sync-failed", () => { setHasSyncFailed(true); });
+        unlistenFailed = await listen("sync-failed", () => { 
+            setHasSyncFailed(true); 
+            setShowOfflineWarning(true); 
+            setIsFullySynced(true);
+        });
+        
+        unlistenStartupFailed = await listen("startup-sync-failed", () => { 
+            setHasSyncFailed(true); 
+            setShowOfflineWarning(true); // <--- Abre a janela de aviso logo na inicialização
+            setIsFullySynced(true);      // <--- Libera o cérebro das datas para processar
+        });
         unlistenChunk = await listen("sync-chunk-done", () => { setRefreshTrigger(Date.now()); });
 
         // 2. SÓ ACORDA O RUST DEPOIS QUE O REACT ESTIVER 100% PRONTO PARA OUVIR
@@ -1164,7 +1180,7 @@ function App() {
             setSplashStatus("Carregado."); 
             setData(initialData); 
             
-            setCompanyCache({ [`${new Date().getFullYear()}-GERAL`]: initialData });
+            setCompanyCache({ "GERAL": initialData });
             
             invoke("finalize_startup").catch(console.error); 
             setTimeout(() => { setIsInitialLoad(false); }, 300);
@@ -1209,34 +1225,53 @@ function App() {
   };
 
 const handleFetchData = async (empresa: string, targetYear: number) => {
-      // MÁGICA: A chave agora é blindada combinando o ANO e a EMPRESA!
-      const cacheKey = `${targetYear}-${empresa || "GERAL"}`;
+      // MÁGICA: A chave usa apenas a Empresa, pois o pacote do banco já traz TODOS os anos juntos!
+      const cacheKey = empresa || "GERAL";
 
-      // Se já tiver no cache da memória, mostra IMEDIATAMENTE (zero espera)
+      // 1. Se já tiver no cache da memória, mostra IMEDIATAMENTE (zero espera)
       if (companyCache[cacheKey]) { 
           setData(companyCache[cacheKey]); 
           setStatusText(`Filtro: ${empresa ? empresa : "Consolidado"} (Cache)`); 
           return; 
       }
       
-      setIsLoadingData(true); 
-      setLoadingMsg(empresa ? "Preparando filtro..." : "Restaurando visão consolidada..."); 
-      setStatusText(empresa ? "Filtrando..." : "Restaurando...");
+      // 2. MÁGICA ANTI-FLICKER (Truque de UX)
+      // Aguarda 300ms antes de mostrar a tela escura. Se o banco SQLite responder rápido, a tela não pisca!
+      let isFetching = true;
+      const loadingTimer = setTimeout(() => {
+          if (isFetching) {
+              setIsLoadingData(true); 
+              setLoadingMsg(empresa ? "Preparando filtro..." : "Restaurando visão consolidada..."); 
+              setStatusText(empresa ? "Filtrando..." : "Restaurando...");
+          }
+      }, 300);
       
-      const unlisten = await listen("splash-status", (event: any) => setLoadingMsg(event.payload as string));
+      const unlisten = await listen("splash-status", (event: any) => {
+          if (isFetching) setLoadingMsg(event.payload as string);
+      });
+      
       const args: any = { year: targetYear };
       if (empresa) args.company = empresa;
 
-      invoke<DashboardData>("fetch_dashboard_data", args)
-          .then(res => { 
-              setData(res); 
-              // SALVA O RESULTADO NA "GAVETA" DA MEMÓRIA
-              setCompanyCache(prev => ({ ...prev, [cacheKey]: res })); 
-              setStatusText(empresa ? `Visualizando: ${empresa}` : "Visão Consolidada restaurada.");
-              setIsLoadingData(false); 
-          })
-          .catch(err => handleApiError(err, () => handleFetchData(empresa, targetYear)))
-          .finally(() => { unlisten(); });
+      try {
+          const res = await invoke<DashboardData>("fetch_dashboard_data", args);
+          
+          // Se chegou aqui a tempo, desativa o "alarme" antes que a tela escura sequer apareça
+          isFetching = false;
+          clearTimeout(loadingTimer);
+          
+          setData(res); 
+          // SALVA O RESULTADO NA "GAVETA" DA MEMÓRIA
+          setCompanyCache(prev => ({ ...prev, [cacheKey]: res })); 
+          setStatusText(empresa ? `Visualizando: ${empresa}` : "Visão Consolidada restaurada.");
+      } catch (err) {
+          isFetching = false;
+          clearTimeout(loadingTimer);
+          handleApiError(err, () => handleFetchData(empresa, targetYear));
+      } finally {
+          setIsLoadingData(false); // Garante que a tela de loading seja desligada sempre
+          unlisten();
+      }
   };
 
   // NOVO: O React escuta a mudança de ano no menu e atualiza os gráficos sozinho!
@@ -1722,9 +1757,18 @@ const footerStats = useMemo(() => {
                         </div>
                     </div>
 
-                    <p style={{ textAlign: 'justify', marginBottom: '15px', color: '#B0BEC5', fontSize: '11px' }}>
-                        Você pode usar o painel com os dados locais normalmente. Assim que conectar à VPN, clique no ícone de <strong>Atualizar</strong> no rodapé para tentar novamente.
-                    </p>
+                    {/* LÓGICA INTELIGENTE: AVALIA SE O CACHE JÁ ESTÁ EM DIA (D-1) */}
+                    {syncDates.nddISO !== "N/D" && syncDates.iwISO !== "N/D" && syncDates.nddISO >= syncDates.targetISO && syncDates.iwISO >= syncDates.targetISO ? (
+                        <div style={{ background: 'rgba(0, 230, 118, 0.1)', border: '1px solid rgba(0, 230, 118, 0.4)', borderRadius: '4px', padding: '10px', marginBottom: '15px' }}>
+                            <p style={{ textAlign: 'justify', margin: 0, color: '#00E676', fontSize: '11.5px' }}>
+                                <strong>Fique tranquilo!</strong> Embora não haja conexão com a nuvem, o cache salvo no seu computador <strong>já possui os dados atualizados (D-1)</strong>. Suas análises não serão prejudicadas!
+                            </p>
+                        </div>
+                    ) : (
+                        <p style={{ textAlign: 'justify', marginBottom: '15px', color: '#B0BEC5', fontSize: '11px' }}>
+                            Você pode usar o painel com os dados locais normalmente. Assim que conectar à VPN, clique no ícone de <strong>Atualizar</strong> no rodapé para tentar novamente.
+                        </p>
+                    )}
                 </div>
 
                 <button 
@@ -1883,15 +1927,17 @@ const footerStats = useMemo(() => {
                         Stack Tecnológico
                     </h3>
                     
-                    {/* Grid em duas colunas para listar as tecnologias COM AS VERSÕES REAIS */}
+                    {/* Grid em duas colunas atualizado com as versões reais da v2.0.1 */}
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                         <li><span style={{color: '#00E5FF'}}>■</span> <b>Tauri:</b> v1.6 (Desktop Engine)</li>
                         <li><span style={{color: '#00E5FF'}}>■</span> <b>Rust:</b> v1.92.0 (Core Backend)</li>
                         <li><span style={{color: '#00E5FF'}}>■</span> <b>React:</b> v19.1.0 (Interface)</li>
                         <li><span style={{color: '#00E5FF'}}>■</span> <b>TypeScript:</b> v5.8.3 (Tipagem)</li>
-                        <li><span style={{color: '#00E5FF'}}>■</span> <b>Vite:</b> v7.0.4 (Build Tool)</li>
+                        <li><span style={{color: '#00E5FF'}}>■</span> <b>Vite:</b> v7.3.1 (Build Tool)</li>
                         <li><span style={{color: '#00E5FF'}}>■</span> <b>Recharts:</b> v3.6.0 (Gráficos)</li>
-                        <li><span style={{color: '#00E5FF'}}>■</span> <b>SQLx:</b> v0.6.3 (Banco de Dados)</li>
+                        <li><span style={{color: '#00E676'}}>■</span> <b>SQLx:</b> v0.6.3 (Conexão BD)</li>
+                        <li><span style={{color: '#00E676'}}>■</span> <b>SQLite:</b> v3 (Local Cache WAL)</li>
+                        <li><span style={{color: '#FFD740'}}>■</span> <b>Tokio:</b> v1.x (Async Workers)</li>
                         <li><span style={{color: '#00E5FF'}}>■</span> <b>Lucide:</b> v0.562.0 (Ícones)</li>
                     </ul>
 
@@ -2322,7 +2368,7 @@ const footerStats = useMemo(() => {
                       
                       {/* LINHA DE BAIXO: Processos em Background (Amarelo SEM negrito) */}
                       <div style={{ display: 'flex', alignItems: 'center', height: '14px', position: 'relative', width: '100%', justifyContent: 'flex-end' }}>
-                          {hasSyncFailed && !syncProgressText && !bgLoading ? (
+                          {hasSyncFailed && !syncProgressText && !bgLoading && !(syncDates.nddISO !== "N/D" && syncDates.iwISO !== "N/D" && syncDates.nddISO >= syncDates.targetISO && syncDates.iwISO >= syncDates.targetISO) ? (
                               <span style={{ color: '#FFD740', fontSize: '11px', fontStyle: 'italic', opacity: 0.9 }}>
                                   Clique para atualizar ➔
                               </span>
@@ -2352,10 +2398,13 @@ const footerStats = useMemo(() => {
                           const txtSync = (syncProgressText || "").toLowerCase();
                           const txtStatus = (statusText || "").toLowerCase();
                           
-                          // MÁGICA: Retiramos o "analisando parque" da verificação de Nuvem!
+                          // 1. Verifica se está trabalhando ativamente com a Nuvem
                           const isWorking = bgLoading || 
                               (txtSync !== "" && !txtSync.includes("falha") && !txtSync.includes("offline") && !txtSync.includes("100% sincronizado") && !txtSync.includes("atualizado")) || 
                               txtStatus.includes("nuvem") || txtStatus.includes("servidor") || txtStatus.includes("atualizando estatísticas");
+
+                          // 2. NOVO: Verifica se a mensagem atual é de sucesso/conclusão do Banco Local
+                          const isLocalReady = txtStatus.includes("pronto") || txtStatus.includes("cache") || txtStatus.includes("restaurada") || txtStatus.includes("atualizada");
 
                           if (isWorking) {
                               return (
@@ -2365,13 +2414,21 @@ const footerStats = useMemo(() => {
                               );
                           }
 
+                          // MÁGICA: Mostra o HD enquant a mensagem de conclusão estiver na tela
+                          if (isLocalReady) {
+                              return (
+                                  <div title="Dados carregados do disco local" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00E5FF', cursor: 'default' }}>
+                                      <HardDrive size={14} />
+                                  </div>
+                              );
+                          }
+
+                          // 3. Padrão: Quando não tem mensagem nenhuma, mostra o botão de Atualizar
                           return (
                               <div 
                                   title={hasSyncFailed ? "Falha na sincronização. Clique para tentar novamente." : "Verificar novas atualizações na Nuvem"}
-                                  // FIXO NA COR DO ÍCONE DE SOBRE (#546E7A)
                                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#546E7A', transition: 'all 0.2s ease', opacity: 1 }}
                                   onClick={handleManualSync}
-                                  // HOVER: Fica amarelo independente do estado de erro
                                   onMouseOver={(e) => { e.currentTarget.style.color = '#FFD740'; }}
                                   onMouseOut={(e) => { e.currentTarget.style.color = '#546E7A'; }}
                               >

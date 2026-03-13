@@ -191,51 +191,57 @@ fn quit_app() { std::process::exit(0); }
 // --- COMANDO FALTANTE ADICIONADO AQUI ---
 #[tauri::command]
 async fn fetch_month_summary_cmd(state: tauri::State<'_, AppState>, year: i32, month: i32) -> Result<Vec<CompanySummary>, String> {
-    // MÁGICA: Clona a conexão ANTES para não trancar a porta (Evita Deadlock)
     let local_pool_opt = state.local_db.lock().await.clone();
     
     if let Some(local_pool) = local_pool_opt {
-        if local_db::LocalDatabase::is_month_synced(&local_pool, year, month).await {
-            if let Ok(summary) = local_db::LocalDatabase::get_local_month_company_summary(&local_pool, year, month).await {
-                if !summary.is_empty() {
-                    return Ok(summary);
-                }
+        // REMOVIDO: A checagem estrita de sincronização. Se tem dado local, use!
+        if let Ok(summary) = local_db::LocalDatabase::get_local_month_company_summary(&local_pool, year, month).await {
+            if !summary.is_empty() {
+                return Ok(summary);
             }
         }
     }
 
-    // Fallback para a nuvem se o mês ainda não baixou
+    // Fallback para a nuvem se o local estiver 100% vazio
     let db_guard = state.db.lock().await;
-    let db = db_guard.as_ref().ok_or("Erro de conexão")?;
-    db.get_month_company_summary(year, month).await.map_err(|e| e.to_string())
+    if let Some(db) = db_guard.as_ref() {
+        if let Ok(data) = db.get_month_company_summary(year, month).await {
+            return Ok(data);
+        }
+    }
+    
+    // MÁGICA: Em vez de disparar Erro e piscar a tela vermelha, retorna array vazio pacientemente.
+    Ok(vec![])
 }
 
 #[tauri::command]
 async fn fetch_month_details_cmd(state: tauri::State<'_, AppState>, year: i32, month: i32, company: Option<String>) -> Result<Vec<DeviceDetail>, String> {
     let target_raw_names = if let Some(comp_name) = company.as_deref() {
         if !comp_name.trim().is_empty() {
-            let map = get_or_create_company_map(state.clone(), year).await?;
+            // Tratamento de erro suave no mapeamento
+            let map = get_or_create_company_map(state.clone(), year).await.unwrap_or_default();
             map.get(comp_name).cloned() 
         } else { None }
     } else { None };
 
-    // Clona a conexão
     let local_pool_opt = state.local_db.lock().await.clone();
     
     if let Some(local_pool) = local_pool_opt {
-        if local_db::LocalDatabase::is_month_synced(&local_pool, year, month).await {
-            if let Ok(details) = local_db::LocalDatabase::get_local_month_details(&local_pool, year, month, target_raw_names.clone()).await {
-                if !details.is_empty() {
-                    return Ok(details);
-                }
+        if let Ok(details) = local_db::LocalDatabase::get_local_month_details(&local_pool, year, month, target_raw_names.clone()).await {
+            if !details.is_empty() {
+                return Ok(details);
             }
         }
     }
 
-    // Fallback para a nuvem
     let db_guard = state.db.lock().await;
-    let db = db_guard.as_ref().ok_or("Erro de conexão")?;
-    db.get_month_details(year, month, target_raw_names).await.map_err(|e| e.to_string())
+    if let Some(db) = db_guard.as_ref() {
+        if let Ok(data) = db.get_month_details(year, month, target_raw_names).await {
+            return Ok(data);
+        }
+    }
+    
+    Ok(vec![])
 }
 
 #[tauri::command]
@@ -700,29 +706,31 @@ async fn fetch_daily_production(
 ) -> Result<Vec<DailyProd>, String> {
     let target_raw_names = if let Some(comp_name) = company.as_deref() {
         if !comp_name.trim().is_empty() {
-            let map = get_or_create_company_map(state.clone(), year).await?;
+            let map = get_or_create_company_map(state.clone(), year).await.unwrap_or_default();
             map.get(comp_name).cloned() 
         } else { None }
     } else { None };
 
     if company.is_some() && target_raw_names.is_none() { return Ok(vec![]); }
 
-    // Clona a conexão para evitar o congestionamento de 6 consultas simultâneas
     let local_pool_opt = state.local_db.lock().await.clone();
     
     if let Some(local_pool) = local_pool_opt {
-        let is_synced = local_db::LocalDatabase::is_month_synced(&local_pool, year, month).await;
         if let Ok(data) = local_db::LocalDatabase::get_local_daily_production(&local_pool, year, month, source.clone(), target_raw_names.clone()).await {
-            // VAZAMENTO 3 SELADO: Retorna Vazio sem ir para nuvem se o mês já estiver local!
-            if !data.is_empty() || is_synced {
+            if !data.is_empty() {
                 return Ok(data);
             }
         }
     }
 
     let db_guard = state.db.lock().await;
-    let db = db_guard.as_ref().ok_or("Banco desconectado")?;
-    db.get_daily_production(year, month, source, target_raw_names).await.map_err(|e| e.to_string())
+    if let Some(db) = db_guard.as_ref() {
+        if let Ok(data) = db.get_daily_production(year, month, source, target_raw_names).await {
+            return Ok(data);
+        }
+    }
+    
+    Ok(vec![])
 }
 
 #[tauri::command]
