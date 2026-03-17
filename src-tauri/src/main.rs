@@ -5,15 +5,18 @@ mod db;
 mod local_db;
 
 use db::Database;
-// Certifique-se de que CompanySummary está aqui
+use tauri::{CustomMenuItem, SystemTray, SystemTrayMenu, SystemTrayMenuItem, SystemTrayEvent, WindowEvent};
+use tauri::api::notification::Notification;
 use models::{DashboardData, ProjectionData, ProductionRecord, MonitoringData, DeviceDetail, CompanySummary};
 use tauri::{Window, Size, LogicalSize, Manager, AppHandle};
 use tokio::sync::Mutex;
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Datelike, Timelike, Local, NaiveDate};
 use std::collections::HashMap;
 use regex::Regex;
 use tokio::time::{sleep, Duration};
 use sqlx::sqlite::SqlitePool;
+use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_autostart::ManagerExt;
 
 struct AppState {
     db: Mutex<Option<Database>>,
@@ -22,6 +25,86 @@ struct AppState {
     monitoring_cache: Mutex<Option<MonitoringData>>,
     companies_map_cache: Mutex<Option<HashMap<String, Vec<String>>>>,
     companies_cache_year: Mutex<Option<i32>>,
+}
+
+// --- COMANDOS DE DEBUG PARA TESTAR A TRAY (COLE AQUI) ---
+#[tauri::command]
+fn debug_trigger_notification(app: AppHandle, alert_type: String) {
+    let identifier = &app.config().tauri.bundle.identifier;
+    
+    let (title, body) = match alert_type.as_str() {
+        "morning" => ("📊 Monitoramento RPA Atualizado!", "Sincronização matinal concluída.\nProdução D-1: 2.5M páginas.\nParque monitorado: 91.5%.\nClique para visualizar o painel."),
+        "risk" => ("⚠️ Alerta de Meta em Risco", "Faltam 5 dias para o fim do mês e o monitoramento da empresa XYZ caiu para 85%."),
+        "anomaly" => ("🚨 Anomalia Detectada", "Queda brusca de comunicação: O volume de impressoras offline aumentou em 15% hoje."),
+        "celebration" => ("🏆 Meta Alcançada!", "Parabéns! Ultrapassamos a marca de 90% de equipamentos monitorados neste mês."),
+        "top5" => ("📈 Destaques de Produção (D-1)", "Top 5 Empresas ontem:\n1. Empresa A (50k)\n2. Empresa B (45k)\n3. Empresa C (40k)\n4. Empresa D (38k)\n5. Empresa E (35k)"),
+        _ => ("Notificação de Teste", "Esta é uma mensagem do sistema.")
+    };
+
+    let _ = Notification::new(identifier)
+        .title(title)
+        .body(body)
+        .icon("icons/icon.ico")
+        .show();
+}
+
+#[tauri::command]
+fn debug_set_tray_status(app: AppHandle, status: String) {
+    let tray_handle = app.tray_handle();
+    match status.as_str() {
+        "syncing" => { let _ = tray_handle.set_tooltip("Monitoramento RPA v3.0\nStatus: ⏳ Sincronizando dados..."); },
+        "outdated" => { let _ = tray_handle.set_tooltip("Monitoramento RPA v3.0\nStatus: ❌ Desatualizado (> 3 dias)\nVerifique a VPN."); },
+        _ => { let _ = tray_handle.set_tooltip("Monitoramento RPA v3.0\nStatus: ✅ Atualizado (D-1)\nMonitorados: 91.5%"); }
+    }
+}
+
+#[derive(serde::Serialize, Clone)]
+struct NotifPayload { title: String, body: String }
+
+#[tauri::command]
+fn show_custom_notification(app: AppHandle, title: String, body: String) {
+    if let Some(window) = app.get_window("notification") {
+        // Calcula onde é o canto inferior direito do monitor
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let monitor_size = monitor.size();
+            let window_size = window.outer_size().unwrap_or(tauri::PhysicalSize::new(420, 250));
+            
+            // X = Largura total da tela - Largura da notificação - 20px de margem
+            let x = (monitor_size.width as i32) - (window_size.width as i32) - 20;
+            // Y = Altura total da tela - Altura da notificação - 70px (margem p/ barra de tarefas do Windows)
+            let y = (monitor_size.height as i32) - (window_size.height as i32) - 70;
+            
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+        
+        // Manda o texto pro React desenhar a janela
+        let _ = window.emit("render-notification", NotifPayload { title, body });
+        
+        // Exibe a janela escondida
+        let _ = window.show();
+    }
+}
+
+#[tauri::command]
+fn hide_custom_notification(app: AppHandle) {
+    if let Some(window) = app.get_window("notification") {
+        let _ = window.hide(); // Esconde a janela quando o tempo acabar
+    }
+}
+
+#[tauri::command]
+fn open_main_window_at(app: AppHandle, tab: String) {
+    if let Some(window) = app.get_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit("navigate-to", tab); // Manda o React mudar a aba
+    }
+}
+
+#[tauri::command]
+fn update_tray_tooltip(app: AppHandle, tooltip: String) {
+    // Atualiza silenciosamente o texto que aparece ao passar o mouse no ícone
+    let _ = app.tray_handle().set_tooltip(&tooltip);
 }
 
 // --- FUNÇÕES AUXILIARES ---
@@ -294,25 +377,48 @@ async fn perform_initial_load(app: AppHandle, window: Window, state: tauri::Stat
                     let conn_str = "mssql://ndd_viewer:ioas%21%40%23ibusad%24%25%24%21%40asd3@192.168.41.22/Db_RPA?encrypt=true&trustServerCertificate=true";
                     
                     if let Ok(db) = Database::new(conn_str).await {
-                        let _ = app_clone.emit_all("sync-status", "Conectado! Sincronizando dados...");
-                        let m_pool = db.get_pool_clone();
+                        
+                        // --- INÍCIO DO CÉREBRO: VERIFICA SE PRECISA MESMO BAIXAR ---
+                        let cloud_ndd = db.get_last_date("vw_NDD").await;
+                        let cloud_iw = db.get_last_date("vw_IW_Main").await;
                         
                         let local_pool_opt = state.local_db.lock().await.clone();
-                        if let Some(l_db) = local_pool_opt {
-                            local_db::LocalDatabase::start_sync_worker(app_clone.clone(), l_db.clone(), m_pool);
+                        let mut precisa_baixar = true;
+                        
+                        if let Some(l_db) = &local_pool_opt {
+                            let local_ndd = local_db::LocalDatabase::get_local_last_date(l_db, "NDD").await;
+                            let local_iw = local_db::LocalDatabase::get_local_last_date(l_db, "IW").await;
                             
-                            if let Ok(mif_data) = db.get_monitoring_stats().await {
-                                if let Ok(json) = serde_json::to_string(&mif_data) {
-                                    let _ = local_db::LocalDatabase::set_cache(&l_db, "mif_stats", &json).await;
-                                }
-                            }
-                            if let Ok(mif_summary) = db.get_monitoring_company_summary().await {
-                                if let Ok(json) = serde_json::to_string(&mif_summary) {
-                                    let _ = local_db::LocalDatabase::set_cache(&l_db, "mif_summary", &json).await;
-                                }
+                            // Se as datas são idênticas, cancela o download
+                            if cloud_ndd == local_ndd && cloud_iw == local_iw && cloud_ndd != "N/D" && cloud_iw != "N/D" {
+                                precisa_baixar = false;
                             }
                         }
-                        
+
+                        if precisa_baixar {
+                            let _ = app_clone.emit_all("sync-status", "Conectado! Baixando atualizações...");
+                            let m_pool = db.get_pool_clone();
+                            
+                            if let Some(l_db) = local_pool_opt {
+                                local_db::LocalDatabase::start_sync_worker(app_clone.clone(), l_db.clone(), m_pool);
+                                
+                                if let Ok(mif_data) = db.get_monitoring_stats().await {
+                                    if let Ok(json) = serde_json::to_string(&mif_data) {
+                                        let _ = local_db::LocalDatabase::set_cache(&l_db, "mif_stats", &json).await;
+                                    }
+                                }
+                                if let Ok(mif_summary) = db.get_monitoring_company_summary().await {
+                                    if let Ok(json) = serde_json::to_string(&mif_summary) {
+                                        let _ = local_db::LocalDatabase::set_cache(&l_db, "mif_summary", &json).await;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Se não tem nada novo, avisa a interface para liberar o painel imediatamente!
+                            let _ = app_clone.emit_all("sync-status", "100% sincronizado (Sistema Atualizado).");
+                        }
+                        // --- FIM DA VERIFICAÇÃO ---
+
                         let mut db_guard = state.db.lock().await;
                         *db_guard = Some(db);
                     } else {
@@ -478,16 +584,24 @@ async fn fetch_full_history(window: Window, state: tauri::State<'_, AppState>) -
 
 #[tauri::command]
 fn finalize_startup(window: Window) {
-    // Clonamos o controle remoto da janela para o Rust não reclamar de uso de memória
+    // Verifica a "senha secreta" do Windows
+    let args: Vec<String> = std::env::args().collect();
+    let is_autostart = args.contains(&"--autostart".to_string());
+
     let window_clone = window.clone();
-    
-    // Devolvemos o comando para a Thread Principal (Agora é 100% seguro)
     let _ = window.run_on_main_thread(move || {
         let _ = window_clone.set_size(Size::Logical(LogicalSize { width: 1050.0, height: 700.0 }));
         let _ = window_clone.set_decorations(true);
         let _ = window_clone.set_resizable(true);
         let _ = window_clone.center();
-        let _ = window_clone.set_focus();
+        
+        // Se iniciou com o Windows, fica escondido. Se foi clique manual, aparece na cara!
+        if is_autostart {
+            let _ = window_clone.hide();
+        } else {
+            let _ = window_clone.show();
+            let _ = window_clone.set_focus();
+        }
     });
 }
 
@@ -530,16 +644,35 @@ async fn fetch_dashboard_data(window: Window, state: tauri::State<'_, AppState>,
                     let cache_guard = state.cache.lock().await;
                     
                     if let Some(cached) = cache_guard.as_ref() {
-                        // 1. Pega do banco local APENAS os anos que já baixaram 100%
-                        let mut merged_p: Vec<_> = p.into_iter().filter(|r| synced_years.contains(&r.ano)).collect();
-                        // 2. Preenche os anos incompletos com os dados "fotografados" da nuvem
-                        let mut cached_p: Vec<_> = cached.production.iter().filter(|r| !synced_years.contains(&r.ano)).cloned().collect();
-                        merged_p.append(&mut cached_p);
+                        // MÁGICA DO MERGE CORRIGIDO:
+                        // 1. Pegamos TUDO que tem no banco local (é a verdade mais recente, mesmo que parcial)
+                        let mut merged_p = p.clone();
+                        let mut merged_c = c.clone();
+
+                        // 2. Olhamos para o cache da nuvem. Se tiver algum registro lá (ano/mês/fonte)
+                        // que AINDA NÃO EXISTE no banco local, nós importamos para tapar o buraco.
+                        for cached_record in &cached.production {
+                            let exists_locally = p.iter().any(|local_r| 
+                                local_r.ano == cached_record.ano && 
+                                local_r.mes == cached_record.mes && 
+                                local_r.source == cached_record.source
+                            );
+                            if !exists_locally {
+                                merged_p.push(cached_record.clone());
+                            }
+                        }
                         production = merged_p;
-                        
-                        let mut merged_c: Vec<_> = c.into_iter().filter(|r| synced_years.contains(&r.ano)).collect();
-                        let mut cached_c: Vec<_> = cached.communication.iter().filter(|r| !synced_years.contains(&r.ano)).cloned().collect();
-                        merged_c.append(&mut cached_c);
+
+                        for cached_comm in &cached.communication {
+                            let exists_locally = c.iter().any(|local_c| 
+                                local_c.ano == cached_comm.ano && 
+                                local_c.mes == cached_comm.mes && 
+                                local_c.source == cached_comm.source
+                            );
+                            if !exists_locally {
+                                merged_c.push(cached_comm.clone());
+                            }
+                        }
                         communication = merged_c;
                     } else {
                         production = p; communication = c;
@@ -812,18 +945,136 @@ async fn check_for_updates(state: tauri::State<'_, AppState>) -> Result<bool, St
 }
 
 fn main() {
-    // --- TRAVA DE INSTÂNCIA ÚNICA (SINGLE INSTANCE LOCK) ---
-    // Cria uma conexão local invisível na porta 58432.
-    // Se a porta já estiver em uso, significa que o programa já está rodando.
-    let _singleton_lock = match std::net::TcpListener::bind("127.0.0.1:58432") {
-        Ok(listener) => listener,
+    // --- TRAVA DE INSTÂNCIA ÚNICA COM "WAKE-UP" (O CUTUCÃO) ---
+    let listener = match std::net::TcpListener::bind("127.0.0.1:58432") {
+        Ok(l) => l,
         Err(_) => {
-            // O programa já está aberto! Fecha esta nova tentativa silenciosamente.
+            // Se já estiver rodando invisível, manda um "WAKE" para acordar a janela!
+            if let Ok(mut stream) = std::net::TcpStream::connect("127.0.0.1:58432") {
+                use std::io::Write;
+                let _ = stream.write_all(b"WAKE");
+            }
             std::process::exit(0);
         }
     };
 
+    // --- CONFIGURAÇÃO DO MENU DA BANDEJA ---
+    let open = CustomMenuItem::new("open".to_string(), "Abrir Dashboard");
+    let sync = CustomMenuItem::new("sync".to_string(), "Sincronizar Agora");
+    let summary = CustomMenuItem::new("summary".to_string(), "Ver Resumo Executivo");
+    let quit = CustomMenuItem::new("quit".to_string(), "Sair do Sistema");
+    
+    let tray_menu = SystemTrayMenu::new()
+        .add_item(open)
+        .add_item(summary)
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(sync)
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(quit);
+        
+    let system_tray = SystemTray::new().with_menu(tray_menu);
+
     tauri::Builder::default()
+        // Registra o Plugin ensinando a senha "--autostart"
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
+        .system_tray(system_tray)
+        
+        .setup(move |app| {
+            let app_handle = app.handle();
+
+            // ---> MÁGICA 0: PREPARAÇÃO DA JANELA FANTASMA <---
+            if let Some(notif_window) = app.get_window("notification") {
+                let _ = notif_window.set_decorations(false); // Arranca a barra superior
+                let _ = notif_window.hide(); // Esconde imediatamente
+            }
+
+            // 1. ESCUTA O "CUTUCÃO" SE O USUÁRIO CLICAR NO ATALHO DE NOVO
+            let wake_handle = app_handle.clone();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if let Ok(_) = stream {
+                        if let Some(window) = wake_handle.get_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                }
+            });
+
+            // 2. FORÇA O AUTO-START A FICAR LIGADO NO WINDOWS
+            let autostart_manager = app.autolaunch();
+            let _ = autostart_manager.enable();
+
+            // 3. ESCONDE O SPLASH SCREEN IMEDIATAMENTE NO BOOT
+            let args: Vec<String> = std::env::args().collect();
+            if args.contains(&"--autostart".to_string()) {
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.hide().unwrap_or_default();
+                }
+            }
+
+            // 4. O RELÓGIO INTERNO (MATINAL E HORÁRIO)
+            let cron_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut last_morning_date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                let mut last_hourly_sync = Local::now().hour();
+
+                loop {
+                    let now = Local::now();
+                    
+                    // 1. Rotina Matinal Fixa (08:30)
+                    if now.hour() == 8 && now.minute() == 30 && now.date_naive() > last_morning_date {
+                        let _ = cron_handle.emit_all("time-to-morning-sync", ());
+                        last_morning_date = now.date_naive();
+                    }
+                    
+                    // 2. Checagem de Hora em Hora (No minuto 00)
+                    if now.minute() == 0 && now.hour() != last_hourly_sync {
+                        let _ = cron_handle.emit_all("time-to-hourly-sync", ());
+                        last_hourly_sync = now.hour();
+                    }
+
+                    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                }
+            });
+            Ok(())
+        })
+
+        // --- LÓGICA DE CLIQUES NA BANDEJA ---
+        .on_system_tray_event(|app, event| match event {
+            SystemTrayEvent::LeftClick { .. } => {
+                let window = app.get_window("main").unwrap();
+                window.show().unwrap();
+                window.set_focus().unwrap();
+            }
+            SystemTrayEvent::MenuItemClick { id, .. } => {
+                match id.as_str() {
+                    "quit" => { std::process::exit(0); }
+                    "open" => {
+                        let window = app.get_window("main").unwrap();
+                        window.show().unwrap();
+                        window.set_focus().unwrap();
+                    }
+                    "sync" => { let _ = app.emit_all("tray-force-sync", ()); }
+                    "summary" => {
+                        // Emite o mesmo "sinal de rádio" que o relógio das 08h30 usa!
+                        // Isso faz o React checar atualizações silenciosamente e abrir o Carrossel.
+                        let _ = app.emit_all("time-to-morning-sync", ());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        })
+        // --- IMPEDE O APP DE MORRER AO FECHAR O 'X' ---
+        .on_window_event(|event| match event.event() {
+            WindowEvent::CloseRequested { api, .. } => {
+                // Esconde a janela e cancela o fechamento do programa
+                event.window().hide().unwrap();
+                api.prevent_close();
+            }
+            _ => {}
+        })
         .manage(AppState { 
             db: Mutex::new(None), cache: Mutex::new(None), 
             local_db: Mutex::new(None),
@@ -834,8 +1085,12 @@ fn main() {
             fetch_dashboard_data, fetch_companies, perform_initial_load, 
             fetch_full_history, finalize_startup, quit_app, fetch_monitoring_data,
             fetch_month_details_cmd, fetch_month_summary_cmd, fetch_monitoring_company_summary,
-            fetch_daily_production, trigger_background_sync, check_for_updates // <--- ADICIONADO AQUI
+            fetch_daily_production, trigger_background_sync, check_for_updates,
+            debug_trigger_notification, debug_set_tray_status, update_tray_tooltip,
+            show_custom_notification, hide_custom_notification, update_tray_tooltip, 
+            open_main_window_at
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

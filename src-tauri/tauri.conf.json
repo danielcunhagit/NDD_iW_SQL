@@ -7,7 +7,7 @@
   },
   "package": {
     "productName": "ndd-sql",
-    "version": "2.0.0"
+    "version": "3.0.0"
   },
   "tauri": {
     "allowlist": {
@@ -15,6 +15,9 @@
       "shell": {
         "all": false,
         "open": true
+      },
+      "notification": {
+        "all": true
       }
     },
   "bundle": {
@@ -34,6 +37,12 @@
           }
         }
       },
+
+      "systemTray": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true
+    },
+
       "updater": {
       "active": true,
       "dialog": true,
@@ -53,7 +62,23 @@
         "width": 450,
         "height": 350,
         "center": true,
-        "decorations": false
+        "decorations": false,
+        "label": "main"
+      },
+      {
+        "label": "notification",
+        "url": "index.html",
+        "fullscreen": false,
+        "resizable": false,
+        "title": "NDD Alerta",
+        "width": 420,
+        "height": 250,
+        "center": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
       }
     ]
   }

@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import "./App.css";
-import { Info, Cloud, HardDrive, RefreshCw } from "lucide-react";
+import { Info, Cloud, HardDrive, RefreshCw, Database, TrendingUp, Activity, Target, Bell } from "lucide-react";
+
 
 // --- TYPES (Mantidos) ---
 interface DashboardData {
@@ -62,6 +63,21 @@ type ViewType = 'production_current' | 'production_compare' | 'communication' | 
 const MESES = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const fmtMilhar = (val: number) => (val !== 0 && val != null) ? val.toLocaleString('pt-BR') : '0';
 const formatDate = (dateStr: string | undefined) => { if (!dateStr || dateStr === "N/D") return "N/D"; try { return new Date(dateStr + "T00:00:00").toLocaleDateString('pt-BR'); } catch { return dateStr; } };
+
+// --- CALCULADOR DE SAÚDE DAS DATAS ---
+const getDateStatusColor = (dbDateIso: string | undefined, targetIso: string) => {
+    if (!dbDateIso || dbDateIso === "N/D" || !targetIso) return '#EF5350'; // Vermelho (Erro/Sem Dado)
+    if (dbDateIso >= targetIso) return '#00E676'; // Verde (Atualizado)
+    
+    // Se for mais velho, calcula a diferença em dias
+    const dbDate = new Date(dbDateIso + "T00:00:00");
+    const targetDate = new Date(targetIso + "T00:00:00");
+    const diffTime = targetDate.getTime() - dbDate.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays <= 7) return '#FFD740'; // Amarelo (Atraso aceitável, até 7 dias)
+    return '#EF5350'; // Vermelho (Muito antigo, > 7 dias)
+};
 
 // ... (MonitoringView, RenderLabels e Tooltips MANTIDOS IGUAIS para economizar espaço aqui, mas devem estar no arquivo) ...
 // CÓPIA DOS COMPONENTES VISUAIS (Mantenha os que você já tem: MonitoringView, RenderPBLabel, DefaultTooltip, etc)
@@ -726,6 +742,385 @@ const WeeklyEvolutionTooltip = ({ active, payload, label, weeklyData, isCurrentO
     return null; 
 };
 
+// ==========================================================
+// MOTOR DE NOTIFICAÇÃO CUSTOMIZADA (Carrossel Executivo V3)
+// ==========================================================
+export const CustomNotification = () => {
+    const [data, setData] = useState({ title: '', body: '' });
+    const [isExiting, setIsExiting] = useState(false);
+    const [slideIndex, setSlideIndex] = useState(0);
+    
+    // Novos estados de controle de tempo e mouse
+    const [isHovered, setIsHovered] = useState(false);
+    const [, setTick] = useState(0);
+
+    let payload: any = null;
+    try { payload = JSON.parse(data.body); } catch(e) {}
+    
+    const isSlideshow = data.title === 'slideshow';
+
+    useEffect(() => {
+        let unlisten: any;
+        const setup = async () => {
+            unlisten = await listen("render-notification", (event: any) => {
+                setData(event.payload);
+                setIsExiting(false);
+                setSlideIndex(0);
+                setTick(0);
+                setIsHovered(false);
+                // NOTA: O setTimeout original sumiu daqui! O Motor de Ticks abaixo assumiu o controle absoluto.
+            });
+        };
+        setup();
+        return () => { if (unlisten) unlisten(); };
+    }, []);
+
+    // ---> O NOVO MOTOR DE TEMPO UNIVERSAL (Pausável) <---
+    useEffect(() => {
+        if (!isExiting && !isHovered) {
+            const interval = setInterval(() => {
+                setTick(prev => {
+                    const next = prev + 1; // 1 pulso = 100ms
+                    
+                    if (isSlideshow) {
+                        // A CADA 8 SEGUNDOS (80 pulsos) TROCA O SLIDE
+                        if (next > 0 && next % 80 === 0) setSlideIndex(i => (i + 1) % 4);
+                        
+                        // TEMPO TOTAL: 4 Slides * 8s = 32 Segundos (320 pulsos)
+                        if (next >= 320) {
+                            setIsExiting(true);
+                            setTimeout(() => invoke('hide_custom_notification'), 600);
+                        }
+                    } else {
+                        // NOTIFICAÇÕES COMUNS: 7 Segundos (70 pulsos)
+                        if (next >= 70) {
+                            setIsExiting(true);
+                            setTimeout(() => invoke('hide_custom_notification'), 600);
+                        }
+                    }
+                    return next;
+                });
+            }, 100);
+            return () => clearInterval(interval);
+        }
+    }, [isSlideshow, isExiting, isHovered]);
+
+    const handleNotificationClick = () => {
+        setIsExiting(true);
+        let targetTab = 'production_current';
+        
+        if (isSlideshow) {
+            if (slideIndex === 0 || slideIndex === 1) targetTab = 'production_current';
+            else if (slideIndex === 2) targetTab = 'communication';
+            else if (slideIndex === 3) targetTab = 'monitoring';
+        } else if (payload && payload.tab) {
+            targetTab = payload.tab;
+        }
+
+        invoke('open_main_window_at', { tab: targetTab });
+        setTimeout(() => invoke('hide_custom_notification'), 400); 
+    };
+
+    // ---> NOVA LÓGICA DE NAVEGAÇÃO POR SCROLL <---
+    const handleWheel = (e: React.WheelEvent) => {
+        if (!isSlideshow) return;
+        
+        let nextIndex = slideIndex;
+        // Scroll para baixo (Avança)
+        if (e.deltaY > 0) {
+            nextIndex = (slideIndex + 1) % 4;
+        } 
+        // Scroll para cima (Volta)
+        else if (e.deltaY < 0) {
+            nextIndex = (slideIndex - 1 + 4) % 4; // "+4" evita números negativos no Javascript
+        }
+        
+        if (nextIndex !== slideIndex) {
+            setSlideIndex(nextIndex);
+            // Sincroniza o Relógio do Tempo! (Cada slide tem 80 pulsos de duração)
+            setTick(nextIndex * 80);
+        }
+    };
+
+    const slides = [
+        { title: 'BASE DE DADOS', Icon: Database, color: '#00E5FF' },
+        { title: 'PREVISÃO DE PRODUÇÃO', Icon: TrendingUp, color: '#B0BEC5' },
+        { title: 'SAÚDE DE COMUNICAÇÃO', Icon: Activity, color: '#00E676' },
+        { title: 'META DE MONITOR...', Icon: Target, color: '#FFD740' }
+    ];
+
+    const currentSlide = isSlideshow ? slides[slideIndex] : { title: data.title, Icon: Bell, color: '#00E5FF' };
+    const borderColor = currentSlide.color;
+    const CurrentIcon = currentSlide.Icon; // Extraímos o Ícone da vez
+
+    return (
+        <div style={{
+            width: '100%', height: '100%', overflow: 'hidden', padding: '10px', boxSizing: 'border-box',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', background: 'transparent'
+        }}>
+            <style>{`
+                @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+                @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(120%); opacity: 0; } }
+                @keyframes shrink { from { width: 100%; } to { width: 0%; } }
+                @keyframes fadeSlideUp { 
+                    0% { opacity: 0; transform: translateY(10px); } 
+                    100% { opacity: 1; transform: translateY(0); } 
+                }
+                .clickable-toast:hover { transform: scale(1.02); filter: brightness(1.1); }
+                .slide-content { animation: fadeSlideUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+            `}</style>
+            
+            <div 
+                className="clickable-toast" 
+                onClick={handleNotificationClick} 
+                onMouseEnter={() => setIsHovered(true)}   
+                onMouseLeave={() => setIsHovered(false)}  
+                onWheel={handleWheel}                     // <--- MÁGICA DO SCROLL AQUI
+                style={{
+                    width: '400px', height: '230px', background: 'rgba(20, 25, 30, 0.95)', cursor: 'pointer', transition: 'all 0.3s ease',
+                    border: `1px solid ${borderColor}`, borderRadius: '8px', boxShadow: `0 8px 24px rgba(0,0,0,0.6), inset 0 0 20px ${borderColor}15`,
+                    display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden',
+                    animation: isExiting ? 'slideOut 0.5s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'slideIn 0.5s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+                }}
+            >
+                <div style={{ padding: '10px 15px', borderBottom: '1px solid #37474F', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.3)', transition: 'all 0.5s' }}>
+                    <span style={{ display: 'flex', alignItems: 'center' }} key={`icon-${slideIndex}`}>
+                        <CurrentIcon size={16} color={borderColor} />
+                    </span>
+                    <h4 key={`t-${slideIndex}`} className="slide-content" style={{ margin: 0, color: '#fff', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px' }}>{currentSlide.title}</h4>
+                    
+                    {/* NOVO: Identificação de Fonte com Tags Profissionais */}
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '9px', color: '#546E7A', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                        MONITORAMENTO
+                        <span className="source-tag src-ndd" style={{ padding: '2px 4px', fontSize: '8px', margin: 0 }}>NDD</span>
+                        <span style={{ color: '#546E7A', textTransform: 'lowercase' }}>e</span>
+                        <span className="source-tag src-iw" style={{ padding: '2px 4px', fontSize: '8px', margin: 0 }}>iW</span>
+                    </div>
+                </div>
+                
+                {/* CORPO DO SLIDE (Com Padding Bottom de 25px para fugir das bolinhas) */}
+                <div style={{ padding: '15px 15px 25px 15px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                    
+                    {isSlideshow && payload && (
+                        <div key={`s-${slideIndex}`} className="slide-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                            
+                            {/* SLIDE 0: DATAS APRIMORADO */}
+                            {slideIndex === 0 && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', height: '100%' }}>
+                                    <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', borderRadius: '6px', border: '1px solid #37474F', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                                        <span style={{ fontSize: '11px', color: '#B0BEC5', fontWeight: 'bold' }}>DATA ESPERADA:</span>
+                                        <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#00E676' }}>{payload.dates.targetBR}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '10px', flex: 1.2 }}>
+                                        <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', borderRadius: '6px', border: '1px solid #37474F', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                            <span style={{ fontSize: '10px', color: '#B0BEC5', fontWeight: 'bold', marginBottom: '2px' }}>NDD PRINT</span>
+                                            <span style={{ fontSize: '18px', fontWeight: 'bold', color: getDateStatusColor(payload.dates.rawNdd, payload.dates.target) }}>{payload.dates.ndd}</span>
+                                        </div>
+                                        <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', borderRadius: '6px', border: '1px solid #37474F', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                            <span style={{ fontSize: '10px', color: '#B0BEC5', fontWeight: 'bold', marginBottom: '2px' }}>iW REMOTE</span>
+                                            <span style={{ fontSize: '18px', fontWeight: 'bold', color: getDateStatusColor(payload.dates.rawIw, payload.dates.target) }}>{payload.dates.iw}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* SLIDE 1: PRODUÇÃO */}
+                            {slideIndex === 1 && (() => {
+                                const growth = parseFloat(payload.production.growthPct);
+                                const isPositive = growth > 0;
+                                const isNegative = growth < 0;
+                                const growthColor = isPositive ? '#00E676' : (isNegative ? '#EF5350' : '#B0BEC5');
+                                const growthIcon = isPositive ? '▲' : (isNegative ? '▼' : '■');
+
+                                return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '8px' }}>
+                                        <div style={{ textAlign: 'center', fontSize: '11px', color: '#00E5FF', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #37474F', paddingBottom: '4px' }}>
+                                            MÊS REFERÊNCIA: {payload.production.monthName}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '10px', flex: 1 }}>
+                                            <div style={{ flex: 1, borderRight: '1px solid #37474F', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                                                {(() => {
+                                                    // Descobre qual é a data mais recente entre NDD e iW para ser 100% preciso
+                                                    const rawNdd = payload.dates.rawNdd !== "N/D" ? payload.dates.rawNdd : "0000-00-00";
+                                                    const rawIw = payload.dates.rawIw !== "N/D" ? payload.dates.rawIw : "0000-00-00";
+                                                    const dataMaisAtual = rawNdd > rawIw ? payload.dates.ndd : payload.dates.iw;
+                                                    
+                                                    return (
+                                                        <span style={{ fontSize: '9px', color: '#B0BEC5', fontWeight: 'bold', textAlign: 'center', lineHeight: '1.2', marginBottom: '2px' }}>
+                                                            PRODUÇÃO ATÉ <br/> <span style={{ color: '#fff' }}>{dataMaisAtual}</span>
+                                                        </span>
+                                                    );
+                                                })()}
+                                                <span style={{ fontSize: '28px', color: '#00E5FF', fontWeight: 'bold' }}>{payload.production.real}M</span>
+                                            </div>
+                                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                                                <span style={{ fontSize: '10px', color: '#B0BEC5', fontWeight: 'bold' }}>PROJEÇÃO</span>
+                                                <span style={{ fontSize: '28px', color: '#FFD740', fontWeight: 'bold', lineHeight: '1' }}>{payload.production.est}M</span>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>
+                                                    <span style={{ color: growthColor, fontSize: '10px', fontWeight: 'bold' }}>{growthIcon} {Math.abs(growth)}%</span>
+                                                    <span style={{ color: '#B0BEC5', fontSize: '9px' }}>vs Mês Ant.</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            {/* SLIDE 2: COMUNICAÇÃO (COM GRÁFICO DONUT APRIMORADO E PORCENTAGENS) */}
+                            {slideIndex === 2 && (() => {
+                                const pct = parseFloat(payload.communication.onlinePct) || 0;
+                                const isCommOk = pct >= payload.communication.target;
+                                const total = payload.communication.onlineTotal + payload.communication.offlineTotal;
+                                const offlinePct = total > 0 ? (payload.communication.offlineTotal / total) * 100 : 0;
+                                const strokeColor = isCommOk ? '#00E676' : '#FFD740';
+                                
+                                const radius = 48;
+                                const circumference = 2 * Math.PI * radius;
+                                const offset = circumference - (pct / 100) * circumference;
+
+                                const badgeText = isCommOk 
+                                    ? `✓ META ATINGIDA${payload.communication.isPartial ? ' (PARCIAL)' : ''}` 
+                                    : `⚠ ABAIXO DA META${payload.communication.isPartial ? ' (PARCIAL)' : ''}`;
+
+                                return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '10px' }}>
+                                        
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '25px' }}>
+                                            <div style={{ position: 'relative', width: '110px', height: '110px' }}>
+                                                <svg viewBox="0 0 120 120" width="100%" height="100%" style={{ filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.5))' }}>
+                                                    <circle cx="60" cy="60" r={radius} fill="transparent" stroke="rgba(239, 83, 80, 0.2)" strokeWidth="14" />
+                                                    <circle cx="60" cy="60" r={radius} fill="transparent" stroke={strokeColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={offset} transform="rotate(-90 60 60)" style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }} />
+                                                    <text x="60" y="58" textAnchor="middle" fill="#fff" fontSize="24" fontWeight="bold">{pct.toFixed(1)}%</text>
+                                                    <text x="60" y="74" textAnchor="middle" fill="#B0BEC5" fontSize="10" fontWeight="bold" opacity="0.8">ONLINE</text>
+                                                </svg>
+                                            </div>
+
+                                            {/* Legenda Alargada para Caber a Porcentagem */}
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', width: '170px', fontSize: '13px' }}>
+                                                    <span style={{ color: '#B0BEC5', display: 'flex', alignItems: 'center' }}>
+                                                        <span style={{ color: strokeColor, marginRight: '6px', fontSize: '10px' }}>●</span>Online
+                                                    </span>
+                                                    <span style={{ color: '#fff', fontWeight: 'bold' }}>
+                                                        {fmtMilhar(payload.communication.onlineTotal)} <span style={{fontSize: '10px', color: '#B0BEC5', fontWeight: 'normal'}}>({pct.toFixed(1)}%)</span>
+                                                    </span>
+                                                </div>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', width: '170px', fontSize: '13px' }}>
+                                                    <span style={{ color: '#B0BEC5', display: 'flex', alignItems: 'center' }}>
+                                                        <span style={{ color: '#EF5350', marginRight: '6px', fontSize: '10px' }}>●</span>Offline
+                                                    </span>
+                                                    <span style={{ color: '#fff', fontWeight: 'bold' }}>
+                                                        {fmtMilhar(payload.communication.offlineTotal)} <span style={{fontSize: '10px', color: '#B0BEC5', fontWeight: 'normal'}}>({offlinePct.toFixed(1)}%)</span>
+                                                    </span>
+                                                </div>
+                                                <div style={{ borderTop: '1px solid #455A64', marginTop: '2px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', width: '170px', fontSize: '10px' }}>
+                                                    <span style={{ color: '#546E7A', fontWeight: 'bold', textTransform: 'uppercase' }}>Total Monitorados</span>
+                                                    <span style={{ color: '#B0BEC5', fontWeight: 'bold', fontSize: '11px' }}>{fmtMilhar(total)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Texto Limpo sem Caixa de Fundo para evitar sobreposição */}
+                                        <div style={{ marginTop: '0px', textAlign: 'center' }}>
+                                            <span style={{ fontSize: '12px', color: isCommOk ? '#00E676' : '#EF5350', fontWeight: 'bold', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                                                {badgeText} <span style={{ opacity: 0.7, fontWeight: 'normal', marginLeft: '4px' }}>(Alvo: {payload.communication.target}%)</span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            {/* SLIDE 3: MONITORAMENTO (MIF) - REDESENHADO COM DATA GRID */}
+                            {slideIndex === 3 && (() => {
+                                const isMifOk = payload.monitoring.currentPct >= payload.monitoring.targetPct;
+                                return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                                        
+                                        {/* GRUPO SUPERIOR (Barras e Cards) */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                            
+                                            {/* Header / Barra de Progresso */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                    <span style={{ fontSize: '10px', color: '#B0BEC5', fontWeight: 'bold' }}>MONITORAMENTO ATUAL</span>
+                                                    <span style={{ fontSize: '24px', color: isMifOk ? '#00E676' : '#EF5350', fontWeight: 'bold', lineHeight: '1' }}>{payload.monitoring.currentPct.toFixed(1)}%</span>
+                                                </div>
+                                                <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'right' }}>
+                                                    <span style={{ fontSize: '10px', color: '#B0BEC5', fontWeight: 'bold' }}>META ALVO</span>
+                                                    <span style={{ fontSize: '16px', color: '#fff', fontWeight: 'bold', lineHeight: '1' }}>{payload.monitoring.targetPct}%</span>
+                                                </div>
+                                            </div>
+                                            <div style={{ width: '100%', height: '6px', background: '#263238', borderRadius: '3px', overflow: 'hidden', marginTop: '-2px' }}>
+                                                <div style={{ width: `${payload.monitoring.currentPct}%`, height: '100%', background: isMifOk ? '#00E676' : '#EF5350', transition: 'width 1s ease' }}></div>
+                                            </div>
+
+                                            {/* Data Grid Profissional */}
+                                            <div style={{ display: 'flex', gap: '10px' }}>
+                                                <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid #37474F', borderRadius: '6px', padding: '10px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                                    <span style={{ fontSize: '9px', color: '#B0BEC5', fontWeight: 'bold', marginBottom: '4px' }}>MONITORÁVEIS</span>
+                                                    <span style={{ fontSize: '18px', color: '#fff', fontWeight: 'bold' }}>{fmtMilhar(payload.monitoring.total)}</span>
+                                                </div>
+                                                
+                                                <div style={{ flex: 1.4, background: 'rgba(0,0,0,0.3)', border: '1px solid #37474F', borderRadius: '6px', padding: '10px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                                    <span style={{ fontSize: '9px', color: '#B0BEC5', fontWeight: 'bold', marginBottom: '4px' }}>MONITORADOS</span>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <span style={{ fontSize: '20px', color: '#00E5FF', fontWeight: 'bold' }}>{fmtMilhar(payload.monitoring.registered)}</span>
+                                                        
+                                                        <div style={{ display: 'flex', flexDirection: 'column', borderLeft: '1px solid #455A64', paddingLeft: '8px', gap: '2px' }}>
+                                                            <span style={{ fontSize: '9px', color: '#B0BEC5' }}>
+                                                                NDD: <span style={{ color: '#fff', fontWeight: 'bold' }}>{fmtMilhar(payload.monitoring.ndd)}</span> 
+                                                                <span style={{ opacity: 0.7 }}> ({payload.monitoring.registered > 0 ? ((payload.monitoring.ndd / payload.monitoring.registered) * 100).toFixed(1) : 0}%)</span>
+                                                            </span>
+                                                            <span style={{ fontSize: '9px', color: '#B0BEC5' }}>
+                                                                iW: <span style={{ color: '#fff', fontWeight: 'bold' }}>{fmtMilhar(payload.monitoring.iw)}</span> 
+                                                                <span style={{ opacity: 0.7 }}> ({payload.monitoring.registered > 0 ? ((payload.monitoring.iw / payload.monitoring.registered) * 100).toFixed(1) : 0}%)</span>
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Footer de Resumo (Empurrado para o fundo com marginTop: 'auto') */}
+                                        <div style={{ textAlign: 'center', fontSize: '11px', color: '#B0BEC5', marginTop: 'auto' }}>
+                                            {isMifOk ? (
+                                                <span style={{ color: '#00E676', fontWeight: 'bold' }}>✓ Parque plenamente auditado!</span>
+                                            ) : (
+                                                <span>Faltam <b style={{ color: '#FFD740' }}>{fmtMilhar(payload.monitoring.missing)}</b> equipamentos para a meta.</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    )}
+                </div>
+
+                {/* INDICADORES DO CARROSSEL */}
+                {isSlideshow && (
+                    <div style={{ position: 'absolute', bottom: '15px', width: '100%', display: 'flex', justifyContent: 'center', gap: '6px' }}>
+                        {[0,1,2,3].map(i => (
+                            <div key={i} style={{ width: '6px', height: '6px', borderRadius: '50%', background: slideIndex === i ? borderColor : '#37474F', transition: 'all 0.3s' }} />
+                        ))}
+                    </div>
+                )}
+                
+                {/* BARRA DE PROGRESSO DO TEMPO (Com Pausa) */}
+                <div style={{ width: '100%', height: '4px', background: '#263238', position: 'absolute', bottom: 0 }}>
+                    <div style={{ 
+                        height: '100%', 
+                        background: borderColor, 
+                        transition: 'background 0.5s', 
+                        animation: data.title ? `shrink ${isSlideshow ? '32s' : '7s'} linear forwards` : 'none',
+                        animationPlayState: isHovered ? 'paused' : 'running' // <--- MÁGICA DO CSS AQUI
+                    }} />
+                </div>
+            </div>
+        </div>
+    );
+};
+// ==========================================================
+
 function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -773,6 +1168,8 @@ function App() {
   const fetchedKeys = useRef<Set<string>>(new Set());
   const dailyRawCache = useRef<Record<string, any[]>>({}); // Cache super rápido para o gráfico de linhas
   const [showNoUpdateModal, setShowNoUpdateModal] = useState(false);
+  const [isMorningRoutine, setIsMorningRoutine] = useState(false);
+  const [showDebugMenu, setShowDebugMenu] = useState(false); // <--- Controla a visibilidade do painel secreto
 
 // AUTO-ATUALIZAÇÃO INTELIGENTE (Sem perder o cache da Visão Consolidada)
   useEffect(() => {
@@ -820,7 +1217,6 @@ function App() {
   useEffect(() => {
       if (!data) return;
 
-      // 1. Atualiza o Rodapé sempre que os dados mudarem (seja via cache, filtro ou robô)
       const today = new Date();
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
@@ -838,8 +1234,44 @@ function App() {
           iwBR: formatDate(data.last_update_iw)
       });
 
-      // 2. AVALIAÇÃO INTELIGENTE: Só julga a data DEPOIS que a nuvem respondeu!
-      // isFullySynced garante que o robô de inicialização ou o botão de atualizar já terminaram o trabalho.
+      // === NOVO CÁLCULO: SAÚDE DE COMUNICAÇÃO (ONLINE %) ===
+      let commPercentage = "0.0";
+      let totalConnGlobal = 0; // <--- NOVO
+      let totalDiscGlobal = 0; // <--- NOVO
+      
+      if (data.communication && data.communication.length > 0) {
+          const currentYear = new Date().getFullYear();
+          const commThisYear = data.communication.filter(c => c.ano === currentYear && (c.connected + c.disconnected) > 0);
+          
+          if (commThisYear.length > 0) {
+              const latestMonth = Math.max(...commThisYear.map(c => c.mes));
+              const totalConn = commThisYear.filter(c => c.mes === latestMonth).reduce((acc, curr) => acc + curr.connected, 0);
+              const totalDisc = commThisYear.filter(c => c.mes === latestMonth).reduce((acc, curr) => acc + curr.disconnected, 0);
+              const totalEqp = totalConn + totalDisc;
+              
+              totalConnGlobal = totalConn; // <--- SALVA O TOTAL
+              totalDiscGlobal = totalDisc; // <--- SALVA O TOTAL
+              
+              if (totalEqp > 0) {
+                  commPercentage = ((totalConn / totalEqp) * 100).toFixed(1);
+              }
+          }
+      }
+
+      // === ATUALIZA O TOOLTIP DA BANDEJA ===
+      let tooltipText = `RPA Monitoramento\n`;
+      const isOutdated = data.last_update_ndd === "N/D" || data.last_update_ndd < targetDateStr || data.last_update_iw === "N/D" || data.last_update_iw < targetDateStr;
+      
+      if (isOutdated) {
+          tooltipText += `❌ Desatualizado\n`;
+      } else {
+          tooltipText += `✅ Atualizado (D-1)\n`;
+      }
+      tooltipText += `Online: ${commPercentage}%`; // <-- Agora reflete os 91% corretamente!
+      
+      invoke('update_tray_tooltip', { tooltip: tooltipText }).catch(console.error);
+      // ====================================================
+
       if (isFullySynced && !hasSyncFailed) {
           let outdated = [];
           if (data.last_update_ndd !== "N/D" && data.last_update_ndd < targetDateStr) outdated.push("NDD Print");
@@ -847,12 +1279,89 @@ function App() {
           
           if (outdated.length > 0) {
               setOutdatedText(outdated.join(" e o "));
-              setShowDataWarning(true);
+              
+              // MÁGICA: Só mostra o modal de alerta UMA VEZ POR DIA!
+              const todayStr = new Date().toDateString();
+              const lastWarning = localStorage.getItem('last_data_warning_date');
+              
+              if (lastWarning !== todayStr) {
+                  setShowDataWarning(true);
+                  localStorage.setItem('last_data_warning_date', todayStr);
+              }
           } else {
-              setShowDataWarning(false); // Fecha o aviso sozinho se a nuvem atualizou as datas!
+              setShowDataWarning(false);
           }
-      }
-  }, [data, isFullySynced, hasSyncFailed]);
+
+          // === ROTINA MATINAL CONCLUÍDA: AVALIAÇÃO INTELIGENTE ===
+          if (isMorningRoutine) {
+              setIsMorningRoutine(false); 
+              
+              const mesAtual = new Date().getMonth() + 1;
+              const anoAtual = new Date().getFullYear();
+              
+              // ---> A MÁGICA DO NOME DO MÊS RESTAURADA AQUI <---
+              const mesesNomes = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+              const nomeMesAtual = mesesNomes[mesAtual];
+              
+              // 1. DADOS DE PRODUÇÃO
+              const prodMes = data.production.filter(prod => prod.ano === anoAtual && prod.mes === mesAtual).reduce((acc, curr) => acc + curr.pb + curr.cor, 0);
+              const estPB = data.projection.ndd_pb + data.projection.iw_pb;
+              const estCor = data.projection.ndd_cor + data.projection.iw_cor;
+              const totalEst = estPB + estCor;
+              
+              // Descobre o mês anterior
+              let prevMonth = mesAtual - 1;
+              let prevYear = anoAtual;
+              if (prevMonth < 1) { prevMonth = 12; prevYear -= 1; }
+              
+              // Soma a produção do mês anterior e calcula a diferença %
+              const prodMesAnterior = data.production.filter(prod => prod.ano === prevYear && prod.mes === prevMonth).reduce((acc, curr) => acc + curr.pb + curr.cor, 0);
+              let pctCrescimento = 0;
+              if (prodMesAnterior > 0) {
+                  pctCrescimento = ((totalEst - prodMesAnterior) / prodMesAnterior) * 100;
+              }
+              
+              // 2. DADOS DE MONITORAMENTO (MIF)
+              const monitorados = monitoringData?.registered || 0;
+              const faltaMonitorar = (monitoringData?.possible_canon || 0) + (monitoringData?.possible_inter || 0);
+              const totalBaseMeta = monitorados + faltaMonitorar;
+              const targetPct = 82.0; // Meta do sistema
+              const targetQtd = Math.ceil(totalBaseMeta * (targetPct / 100));
+              const qtdeAMais = targetQtd > monitorados ? targetQtd - monitorados : 0;
+              const currentMifPct = totalBaseMeta > 0 ? (monitorados / totalBaseMeta) * 100 : 0;
+
+              // ENVIA O MALOTE ÚNICO DO CARROSSEL
+              invoke('show_custom_notification', { 
+                  title: 'slideshow', // Tag secreta para ativar o carrossel
+                  body: JSON.stringify({
+                      dates: { ndd: syncDates.nddBR, iw: syncDates.iwBR, target: syncDates.targetISO, targetBR: syncDates.targetBR, rawNdd: data.last_update_ndd, rawIw: data.last_update_iw },
+                      production: { 
+                          real: (prodMes / 1000000).toFixed(1), 
+                          est: (totalEst / 1000000).toFixed(1),
+                          monthName: nomeMesAtual, // <--- AGORA ELE SABE QUEM É!
+                          growthPct: pctCrescimento.toFixed(1) 
+                      },
+                      communication: { 
+                          onlinePct: commPercentage, 
+                          onlineTotal: totalConnGlobal, 
+                          offlineTotal: totalDiscGlobal, 
+                          target: 90.0,
+                          isPartial: data.last_update_ndd !== "N/D" && new Date(data.last_update_ndd + "T00:00:00").getMonth() === new Date().getMonth() 
+                      },
+                      monitoring: { 
+                          total: totalBaseMeta, 
+                          registered: monitorados,      // <--- NOVO
+                          ndd: monitoringData?.ndd || 0, // <--- NOVO
+                          iw: monitoringData?.iw || 0,   // <--- NOVO
+                          currentPct: currentMifPct, 
+                          missing: qtdeAMais, 
+                          targetPct: targetPct 
+                      }
+                  })
+              });
+          }
+      } // <--- ADICIONE ESTA CHAVE AQUI (Ela fecha a trava de sincronização)
+  }, [data, isFullySynced, hasSyncFailed, isMorningRoutine, monitoringData]);
 
   // Auto-limpador inteligente de mensagens do rodapé
   useEffect(() => {
@@ -865,30 +1374,56 @@ function App() {
       }
   }, [statusText]);
 
-  // ---> FUNÇÃO PARA O BOTÃO DE ATUALIZAR <---
-  const handleManualSync = async () => {
-      if (syncProgressText || bgLoading) return; // Impede duplo clique
-      
+  // Auto-limpador inteligente de mensagens da NUVEM (faz o 100% sumir)
+  useEffect(() => {
+      if (!syncProgressText) return;
+      if (syncProgressText.includes("100% sincronizado")) {
+          const timer = setTimeout(() => setSyncProgressText(""), 4000); // Some após 4 segundos
+          return () => clearTimeout(timer);
+      }
+  }, [syncProgressText]);
+
+  // ---> MOTOR DE ATUALIZAÇÃO INTELIGENTE (Manual, Matinal e Horário) <---
+  const handleManualSync = async (triggerType: 'manual' | 'morning' | 'hourly' = 'manual') => {
+      if (syncProgressText || bgLoading) return; 
       setSyncProgressText("Verificando servidor...");
+      
       try {
           const hasUpdates = await invoke<boolean>("check_for_updates");
           
           if (!hasUpdates) {
               setSyncProgressText("");
-              setIsFullySynced(true); // <--- AVISA O CÉREBRO QUE A NUVEM JÁ FOI CHECADA
-              setShowNoUpdateModal(true); 
+              setHasSyncFailed(false);
+              setIsFullySynced(true); 
+              
+              if (triggerType === 'morning') {
+                  setIsMorningRoutine(true); // 08h30: Dispara o carrossel MESMO sem dados novos
+              } else if (triggerType === 'manual') {
+                  setShowNoUpdateModal(true); // Usuário clicou: Mostra aviso verde
+              }
+              // Se for 'hourly', morre silenciosamente, não perturba o usuário.
           } else {
               setIsFullySynced(false); 
               setHasSyncFailed(false);
-              setShowDataWarning(false); // <--- ESCONDE O AVISO ENQUANTO BAIXA
+              setShowDataWarning(false); 
               setSyncProgressText("Iniciando download da nuvem...");
-              await invoke("trigger_background_sync"); // Inicia o robô
+              invoke('update_tray_tooltip', { tooltip: "Monitoramento RPA v3.0\nStatus: ⏳ Sincronizando..." });
+              
+              if (triggerType === 'morning' || triggerType === 'hourly') {
+                  setIsMorningRoutine(true); // Fica na espera. Vai soltar os balões quando o download acabar.
+              }
+              await invoke("trigger_background_sync"); 
           }
       } catch (e) {
           console.error(e);
           setSyncProgressText("");
           setHasSyncFailed(true);
-          setShowOfflineWarning(true);
+          
+          if (triggerType === 'morning') {
+              setIsMorningRoutine(true); // 08h30: Dispara o carrossel MESMO se a internet cair (Modo Offline)
+          } else if (triggerType === 'manual') {
+              setShowOfflineWarning(true);
+          }
       }
   };
   
@@ -904,7 +1439,7 @@ function App() {
   };
   
   // ---> LÓGICA DE "O QUE HÁ DE NOVO" <---
-  const APP_VERSION = "2.0.0"; // Mude isso no futuro para disparar a janela de novo!
+  const APP_VERSION = "3.0.0"; // Dispara a janela de novidades!
   const [showWhatsNew, setShowWhatsNew] = useState(false);
 
   useEffect(() => {
@@ -1107,11 +1642,21 @@ function App() {
 
   useEffect(() => {
     let unlisten: any; let unlistenMonitor: any; let unlistenLoading: any; let unlistenSync: any; let unlistenCompanies: any; let unlistenFailed: any; let unlistenChunk: any; let unlistenStartupFailed: any;
-    
+    let unlistenMorning: any; let unlistenTraySync: any; let unlistenNavigate: any; let unlistenHourly: any;
+
     const initEverything = async () => {
         // Trava imediata para evitar dupla inicialização
         if (didInit.current) return;
         didInit.current = true;
+
+        // --- ESCUTAS DE RELÓGIO DO RUST ---
+        unlistenMorning = await listen("time-to-morning-sync", () => {
+            handleManualSync('morning'); 
+        });
+        
+        unlistenHourly = await listen("time-to-hourly-sync", () => {
+            handleManualSync('hourly'); 
+        });
 
         // 1. OBRIGA O REACT A REGISTRAR OS OUVINTES PRIMEIRO (AGUARDA CADA UM)
         unlisten = await listen("splash-status", (event: any) => { 
@@ -1160,10 +1705,23 @@ function App() {
         
         unlistenStartupFailed = await listen("startup-sync-failed", () => { 
             setHasSyncFailed(true); 
-            setShowOfflineWarning(true); // <--- Abre a janela de aviso logo na inicialização
-            setIsFullySynced(true);      // <--- Libera o cérebro das datas para processar
+            setShowOfflineWarning(true);
+            setIsFullySynced(true);
         });
         unlistenChunk = await listen("sync-chunk-done", () => { setRefreshTrigger(Date.now()); });
+
+        // --- ESCUTA O CLIQUE DO ALERTA E MUDA A ABA ---
+        unlistenNavigate = await listen("navigate-to", (event: any) => {
+            setCurrentView(event.payload as ViewType);
+            setIsPanelOpen(false); 
+            setShowWeeklyModal(false);
+            setShowAbout(false);
+        });
+        
+        // --- ESCUTA O CLIQUE DO MENU DA BANDEJA PARA ATUALIZAR ---
+        unlistenTraySync = await listen("tray-force-sync", () => { 
+            handleManualSync('manual'); 
+        });
 
         // 2. SÓ ACORDA O RUST DEPOIS QUE O REACT ESTIVER 100% PRONTO PARA OUVIR
         try {
@@ -1205,6 +1763,8 @@ function App() {
         if(unlistenLoading) unlistenLoading(); if(unlistenSync) unlistenSync(); 
         if(unlistenCompanies) unlistenCompanies(); if(unlistenFailed) unlistenFailed(); 
         if(unlistenChunk) unlistenChunk(); if(unlistenStartupFailed) unlistenStartupFailed(); 
+        if(unlistenMorning) unlistenMorning(); if(unlistenTraySync) unlistenTraySync(); 
+        if(unlistenNavigate) unlistenNavigate(); if(unlistenHourly) unlistenHourly();
     };
   }, []);
 
@@ -1653,7 +2213,7 @@ const footerStats = useMemo(() => {
           )}
           
             <div className="splash-version" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              v2.0.0 <span style={{ color: '#455A64' }}>|</span> 
+              v3.0.0 <span style={{ color: '#455A64' }}>|</span> 
               Fonte de Dados: {isUsingLocalDB ? 'Banco Local' : 'Nuvem'} 
               {isUsingLocalDB && !syncProgressText ? <HardDrive size={12} /> : <Cloud size={12} />}
           </div>
@@ -1702,13 +2262,13 @@ const footerStats = useMemo(() => {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                             <span style={{ color: '#B0BEC5' }}>Última Atualização NDD:</span>
-                            <span style={{ color: syncDates.nddISO !== "N/D" && syncDates.nddISO >= syncDates.targetISO ? '#00E676' : '#EF5350', fontWeight: 'bold' }}>
+                            <span style={{ color: getDateStatusColor(data?.last_update_ndd, syncDates.targetISO), fontWeight: 'bold' }}>
                                 {syncDates.nddBR}
                             </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <span style={{ color: '#B0BEC5' }}>Última Atualização iW:</span>
-                            <span style={{ color: syncDates.iwISO !== "N/D" && syncDates.iwISO >= syncDates.targetISO ? '#00E676' : '#EF5350', fontWeight: 'bold' }}>
+                            <span style={{ color: getDateStatusColor(data?.last_update_iw, syncDates.targetISO), fontWeight: 'bold' }}>
                                 {syncDates.iwBR}
                             </span>
                         </div>
@@ -1853,43 +2413,36 @@ const footerStats = useMemo(() => {
       {showWhatsNew && (
         <div className="about-overlay" onClick={() => setShowWhatsNew(false)} style={{ zIndex: 10000 }}>
             <div className="about-box" style={{ width: '580px', borderTop: '4px solid #00E5FF' }} onClick={e => e.stopPropagation()}>
-                <h2 className="about-title" style={{ color: '#00E5FF', marginBottom: '5px' }}>🚀 A Grande Atualização 2.0</h2>
-                <p style={{ fontSize: '12px', color: '#B0BEC5', marginBottom: '20px' }}>Veja por que o Monitoramento RPA está mais rápido do que nunca</p>
+                <h2 className="about-title" style={{ color: '#00E5FF', marginBottom: '5px' }}>🚀 A Grande Atualização 3.0</h2>
+                <p style={{ fontSize: '12px', color: '#B0BEC5', marginBottom: '20px' }}>Um salto em Experiência do Usuário (UX) e Inteligência de Dados</p>
 
                 <div className="about-content" style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '10px' }}>
                     
-                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #00E676' }}>
-                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>⚡ Desempenho na Velocidade da Luz</h4>
+                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #00E5FF' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🔔 Notificações Inteligentes e Interativas</h4>
                         <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
-                            Esqueça as telas de carregamento demoradas. Agora o sistema possui um <strong>banco de dados local</strong>. Mudar de ano, filtrar empresas e abrir os painéis agora acontece de forma <strong>instantânea</strong>.
+                            Adeus balões cinzas! Agora o sistema possui um motor próprio de alertas. Notificações flutuantes ricas em gráficos, barras de progresso e números gigantes alertam sobre o fechamento do mês. <strong>Clique nelas para ser redirecionado automaticamente à aba certa do sistema (Deep Linking)</strong>.
+                        </p>
+                    </div>
+
+                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #00E676' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🧠 Sincronização Pensante (Smart Sync)</h4>
+                        <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
+                            O robô de background agora pensa antes de agir. Ao iniciar, ele compara os dias das datas locais com a nuvem e <strong>só baixa pacotes novos se houver real necessidade</strong>, reduzindo drastically o uso de rede e CPU no momento que você abre o programa.
                         </p>
                     </div>
 
                     <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #FFD740' }}>
-                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🤖 Robô de Sincronização Invisível</h4>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🎨 Termômetro Visual de Saúde (Rodapé)</h4>
                         <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
-                            O aplicativo não trava mais enquanto baixa dados. Um robô silencioso trabalha no rodapé baixando as atualizações. Quando ele termina, <strong>seus gráficos piscam e se atualizam sozinhos</strong>!
+                            Basta um olhar para o rodapé para saber a integridade do banco de dados. As datas de atualização agora usam uma paleta orgânica: ficam <strong>Verdes</strong> se estiverem em dia, <strong>Amarelas</strong> para pequenos atrasos aceitáveis e <strong>Vermelhas</strong> se a defasagem for crítica.
                         </p>
                     </div>
 
-                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #00E5FF' }}>
-                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🔌 Modo Offline (Sem VPN)</h4>
+                    <div style={{ marginBottom: '10px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #E040FB' }}>
+                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>📊 Ranking Top 5 Aprimorado</h4>
                         <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
-                            Está sem internet ou esqueceu a VPN desligada? Sem problemas! O <strong>Modo Offline</strong> permite que você continue analisando e explorando todos os dados do seu último acesso perfeitamente.
-                        </p>
-                    </div>
-
-                    <div style={{ marginBottom: '15px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #E040FB' }}>
-                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>📈 Novas Previsões Semanais</h4>
-                        <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
-                            Adicionamos um novo relatório interativo. Clique no botão <strong>Previsões Semanais</strong> na tela inicial para acompanhar o fechamento do mês dia a dia, comparando a meta com o mês anterior.
-                        </p>
-                    </div>
-
-                    <div style={{ marginBottom: '10px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #FF5252' }}>
-                        <h4 style={{ color: '#fff', marginBottom: '5px', fontSize: '13px' }}>🧠 Cérebro Híbrido Autocurável</h4>
-                        <p style={{ fontSize: '12px', color: '#B0BEC5', textAlign: 'justify', margin: 0, lineHeight: '1.4' }}>
-                            No seu primeiro acesso, para você não ficar esperando, o sistema costura os dados da Nuvem com os dados do seu computador. Os gráficos nunca ficam vazios enquanto o aplicativo se constrói!
+                            O ranking de empresas na notificação ganhou um visual de barras neon. Ele exibe com precisão o mês analisado, ajusta os números longos com pontuações (ex: 4.654.321) e esconde graciosamente nomes de empresas gigantes para não quebrar a tela.
                         </p>
                     </div>
 
@@ -1902,7 +2455,7 @@ const footerStats = useMemo(() => {
                     onMouseOver={(e) => { e.currentTarget.style.background = '#00E5FF'; e.currentTarget.style.color = '#000'; }}
                     onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#00E5FF'; }}
                 >
-                    Voltar para o sistema
+                    Começar a usar a v3.0
                 </button>
             </div>
         </div>
@@ -1913,7 +2466,7 @@ const footerStats = useMemo(() => {
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
             <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
-                <p className="about-version">Versão 2.0.0</p>
+                <p className="about-version">Versão 3.0.0</p>
                 
                 <div className="about-content">
                     <p style={{textAlign: 'justify', marginBottom: '15px'}}>
@@ -2187,17 +2740,19 @@ const footerStats = useMemo(() => {
                 {currentView === 'production_compare' ? `Comparativo ${year} vs ${year-1}` : currentView === 'communication' ? 'Status de Comunicação' : currentView === 'monitoring' ? 'Monitoramento de Parque (MIF)' : 'Visão Geral de Produção'}
               </h2>
               
-              {/* Botão Retangular, sem borda, seguindo o padrão das abas */}
+              {/* Botão Retangular Profissional com Ícone Lucide */}
               {currentView === 'production_current' && (
                   <button 
-                      onClick={() => { setWeeklyOffset(0); setShowWeeklyModal(true); }}
-                      title="Ver previsões semanais acumuladas"
+                      onClick={() => { 
+                          setWeeklyOffset(0);
+                          setShowWeeklyModal(true); 
+                      }}
                       style={{ 
                           background: 'rgba(0, 229, 255, 0.08)', 
                           color: '#00E5FF', 
-                          border: 'none', 
+                          border: '1px solid rgba(0, 229, 255, 0.15)', 
                           padding: '6px 14px', 
-                          borderRadius: '4px', /* Visual retangular */
+                          borderRadius: '4px', 
                           fontSize: '11px', 
                           fontWeight: 'bold',
                           cursor: 'pointer',
@@ -2210,7 +2765,8 @@ const footerStats = useMemo(() => {
                       onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(0, 229, 255, 0.15)'; }}
                       onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(0, 229, 255, 0.08)'; }}
                   >
-                      <span style={{ fontSize: '13px' }}>📈</span> Previsões Semanais
+                      <TrendingUp size={18} color="#00E5FF" /> 
+                      Previsões Semanais
                   </button>
               )}
           </div>
@@ -2324,16 +2880,64 @@ const footerStats = useMemo(() => {
             )}
         </div>
 
+
+{/* =========================================================
+            PAINEL DE DESENVOLVEDOR SECRETO (TESTES V3.0.0)
+            ========================================================= */}
+        {showDebugMenu && (
+            <div style={{
+                position: 'absolute', top: '70px', right: '20px', width: '220px',
+                background: 'rgba(20, 20, 20, 0.95)', border: '1px solid #00E5FF',
+                borderRadius: '6px', padding: '15px', zIndex: 9000,
+                display: 'flex', flexDirection: 'column', gap: '5px',
+                boxShadow: '0 0 20px rgba(0, 229, 255, 0.3)'
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <h4 style={{ color: '#00E5FF', margin: 0, fontSize: '11px', textTransform: 'uppercase' }}>
+                        🛠️ Modo Dev (Tray)
+                    </h4>
+                    <button 
+                        onClick={() => setShowDebugMenu(false)}
+                        style={{ background: 'transparent', border: 'none', color: '#EF5350', cursor: 'pointer', fontWeight: 'bold', padding: 0 }}
+                    >
+                        ✕
+                    </button>
+                </div>
+                
+                <span style={{ fontSize: '9px', color: '#B0BEC5' }}>Testar Notificações Inteligentes:</span>
+                <button onClick={() => handleManualSync('morning')} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid #00E5FF', color: '#00E5FF' }}>🌅 Iniciar Rotina Real (08:30)</button>
+                <button onClick={() => invoke('debug_trigger_notification', { alertType: 'risk' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#FFD740' }}>⚠️ Risco de Meta</button>
+                <button onClick={() => invoke('debug_trigger_notification', { alertType: 'anomaly' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🚨 Anomalia</button>
+                <button onClick={() => invoke('debug_trigger_notification', { alertType: 'celebration' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#00E676' }}>🏆 Celebração (Meta)</button>
+                <button onClick={() => invoke('debug_trigger_notification', { alertType: 'top5' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px' }}>📈 Top 5 Empresas</button>
+
+                <span style={{ fontSize: '9px', color: '#B0BEC5', marginTop: '10px' }}>Testar Tooltip da Bandeja:</span>
+                <button onClick={() => invoke('debug_set_tray_status', { status: 'success' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#00E676' }}>🟢 Simular: Atualizado</button>
+                <button onClick={() => invoke('debug_set_tray_status', { status: 'syncing' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#FFD740' }}>🟡 Simular: Baixando</button>
+                <button onClick={() => invoke('debug_set_tray_status', { status: 'outdated' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🔴 Simular: Velho</button>
+            </div>
+        )}
+        {/* ========================================================= */}
+
         <footer>
             <div className="footer-left">
-                <span style={{ color: '#B0BEC5', marginRight: '5px' }}>Atualizado em:</span>
+                {/* O GATILHO SECRETO: A Dica em texto foi removida! */}
+                <span 
+                    style={{ color: '#B0BEC5', marginRight: '5px', cursor: 'default' }}
+                    onDoubleClick={() => setShowDebugMenu(true)}
+                >
+                    Atualizado em:
+                </span>
                 
                 <div 
                     className="footer-item" 
                     title={syncDates.nddISO !== "N/D" && syncDates.nddISO >= syncDates.targetISO ? "✅ Banco de dados atualizado" : `⚠️ Desatualizado (Esperado: ${syncDates.targetBR})`} 
                     style={{cursor: 'help'}}
                 >
-                    <span>NDD:</span> <b>{formatDate(data?.last_update_ndd)}</b>
+                    <span>NDD:&nbsp;</span> 
+                    <b style={{ color: getDateStatusColor(data?.last_update_ndd, syncDates.targetISO), transition: 'color 0.3s ease' }}>
+                        {formatDate(data?.last_update_ndd)}
+                    </b>
                 </div>
                 
                 <div className="separator">|</div>
@@ -2343,7 +2947,10 @@ const footerStats = useMemo(() => {
                     title={syncDates.iwISO !== "N/D" && syncDates.iwISO >= syncDates.targetISO ? "✅ Banco de dados atualizado" : `⚠️ Desatualizado (Esperado: ${syncDates.targetBR})`} 
                     style={{cursor: 'help'}}
                 >
-                    <span>iW:</span> <b>{formatDate(data?.last_update_iw)}</b>
+                    <span>iW:&nbsp;</span>
+                    <b style={{ color: getDateStatusColor(data?.last_update_iw, syncDates.targetISO), transition: 'color 0.3s ease' }}>
+                        {formatDate(data?.last_update_iw)}
+                    </b>
                 </div>
             </div>
             <div className="footer-right" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2373,8 +2980,13 @@ const footerStats = useMemo(() => {
                                   Clique para atualizar ➔
                               </span>
                           ) : syncProgressText ? (
-                              <span style={{ color: '#FFD740', fontSize: '11px', fontWeight: 'normal', display: 'flex', alignItems: 'center', margin: 0 }}>
-                                  <span className="footer-spinner" style={{ marginRight: '5px', width: '10px', height: '10px', borderWidth: '2px', borderColor: 'rgba(255, 215, 64, 0.2)', borderTopColor: '#FFD740' }}></span>
+                              <span style={{ 
+                                  color: syncProgressText.includes("100%") ? '#00E676' : '#FFD740', // Fica Verde se for sucesso
+                                  fontSize: '11px', fontWeight: 'normal', display: 'flex', alignItems: 'center', margin: 0 
+                              }}>
+                                  {!syncProgressText.includes("100%") && ( // Oculta o Spinner se for 100%
+                                      <span className="footer-spinner" style={{ marginRight: '5px', width: '10px', height: '10px', borderWidth: '2px', borderColor: 'rgba(255, 215, 64, 0.2)', borderTopColor: '#FFD740' }}></span>
+                                  )}
                                   {syncProgressText}
                               </span>
                           ) : statusText && !statusText.startsWith("Visualizando") && statusText !== "Consolidado." && (
@@ -2428,7 +3040,7 @@ const footerStats = useMemo(() => {
                               <div 
                                   title={hasSyncFailed ? "Falha na sincronização. Clique para tentar novamente." : "Verificar novas atualizações na Nuvem"}
                                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#546E7A', transition: 'all 0.2s ease', opacity: 1 }}
-                                  onClick={handleManualSync}
+                                  onClick={() => handleManualSync('manual')}
                                   onMouseOver={(e) => { e.currentTarget.style.color = '#FFD740'; }}
                                   onMouseOut={(e) => { e.currentTarget.style.color = '#546E7A'; }}
                               >

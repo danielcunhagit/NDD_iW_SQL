@@ -9,16 +9,13 @@ edition = "2021"
 tauri-build = { version = "1", features = [] }
 
 [dependencies]
-# ADICIONE ESTA LINHA AQUI:
-tauri = { version = "1", features = ["shell-open", "updater", "dialog"] }
-
+tauri = { version = "1", features = [ "system-tray", "notification-all", "shell-open", "updater", "dialog"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
-
-# Adicionamos o "sqlite" na lista de features!
+tauri-plugin-autostart = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1" }
 sqlx = { version = "=0.6.3", features = ["runtime-tokio-rustls", "mssql", "sqlite", "chrono", "macros", "offline"] }
 
 [features]
