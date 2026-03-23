@@ -384,33 +384,49 @@ async fn perform_initial_load(app: AppHandle, window: Window, state: tauri::Stat
                         
                         let local_pool_opt = state.local_db.lock().await.clone();
                         let mut precisa_baixar = true;
+                        let mut mif_missing = false; // <--- NOVO: Verifica se o diagrama MIF está faltando no disco
                         
                         if let Some(l_db) = &local_pool_opt {
                             let local_ndd = local_db::LocalDatabase::get_local_last_date(l_db, "NDD").await;
                             let local_iw = local_db::LocalDatabase::get_local_last_date(l_db, "IW").await;
                             
-                            // Se as datas são idênticas, cancela o download
                             if cloud_ndd == local_ndd && cloud_iw == local_iw && cloud_ndd != "N/D" && cloud_iw != "N/D" {
                                 precisa_baixar = false;
                             }
+                            
+                            if local_db::LocalDatabase::get_cache(l_db, "mif_stats").await.is_none() {
+                                mif_missing = true;
+                            }
                         }
 
-                        if precisa_baixar {
+                        // Se precisa baixar histórico OU se falta o gráfico do MIF
+                        if precisa_baixar || mif_missing {
                             let _ = app_clone.emit_all("sync-status", "Conectado! Baixando atualizações...");
                             let m_pool = db.get_pool_clone();
                             
                             if let Some(l_db) = local_pool_opt {
-                                local_db::LocalDatabase::start_sync_worker(app_clone.clone(), l_db.clone(), m_pool);
+                                // Só aciona o worker pesado se realmente tiver dados de produção pra baixar
+                                if precisa_baixar {
+                                    local_db::LocalDatabase::start_sync_worker(app_clone.clone(), l_db.clone(), m_pool);
+                                }
                                 
+                                // O diagrama MIF é atualizado independente do worker
                                 if let Ok(mif_data) = db.get_monitoring_stats().await {
                                     if let Ok(json) = serde_json::to_string(&mif_data) {
                                         let _ = local_db::LocalDatabase::set_cache(&l_db, "mif_stats", &json).await;
                                     }
+                                    let state_in = app_clone.state::<AppState>();
+                                    let mut mem_cache = state_in.monitoring_cache.lock().await;
+                                    *mem_cache = Some(mif_data);
                                 }
                                 if let Ok(mif_summary) = db.get_monitoring_company_summary().await {
                                     if let Ok(json) = serde_json::to_string(&mif_summary) {
                                         let _ = local_db::LocalDatabase::set_cache(&l_db, "mif_summary", &json).await;
                                     }
+                                }
+                                
+                                if !precisa_baixar && mif_missing {
+                                    let _ = app_clone.emit_all("sync-status", "100% sincronizado (Sistema Atualizado).");
                                 }
                             }
                         } else {
@@ -770,18 +786,15 @@ async fn fetch_monitoring_company_summary(state: tauri::State<'_, AppState>) -> 
     
     if let Some(local_pool) = local_pool_opt {
         if let Some(json_str) = local_db::LocalDatabase::get_cache(&local_pool, "mif_summary").await {
+            // MÁGICA DE COMPATIBILIDADE: Lê até cache velho sem travar!
             if let Ok(data) = serde_json::from_str::<Vec<models::MonitoringCompanySummary>>(&json_str) {
                 return Ok(data);
             }
         }
     }
     
-    let db_guard = state.db.lock().await;
-    if let Some(db) = db_guard.as_ref() {
-        return db.get_monitoring_company_summary().await.map_err(|e| e.to_string());
-    }
-    
-    // MÁGICA: Se estiver OFFLINE e sem cache, devolve lista vazia em vez de dar erro infinito!
+    // OFFLINE-FIRST ESTRITO: NUNCA TOCA NA NUVEM! Retorna vazio imediatamente.
+    // O robô de background que atualizará o disco depois.
     Ok(vec![])
 }
 
@@ -808,18 +821,8 @@ async fn fetch_monitoring_data(window: Window, state: tauri::State<'_, AppState>
         }
     }
 
-    let db_guard = state.db.lock().await;
-    if let Some(db) = db_guard.as_ref() {
-        let _ = window.emit("monitoring-status", "Analisando parque (MIF)...");
-        let result = db.get_monitoring_stats().await.map_err(|e| e.to_string())?;
-        
-        let mut cache = state.monitoring_cache.lock().await;
-        *cache = Some(result.clone());
-        return Ok(result);
-    }
-
-    // MÁGICA: Se estiver OFFLINE e sem cache, devolve zeros em vez de dar erro infinito!
-    let _ = window.emit("monitoring-status", "Monitoramento indisponível offline.");
+    // OFFLINE-FIRST ESTRITO: NUNCA TOCA NA NUVEM AQUI! Retorna ZEROS imediatamente.
+    let _ = window.emit("monitoring-status", "Aguardando sincronização de background...");
     Ok(MonitoringData::default())
 }
 
@@ -894,6 +897,10 @@ async fn trigger_background_sync(app: AppHandle, state: tauri::State<'_, AppStat
                     if let Ok(json) = serde_json::to_string(&mif_data) {
                         let _ = local_db::LocalDatabase::set_cache(&l_db, "mif_stats", &json).await;
                     }
+                    // ---> MÁGICA DE MEMÓRIA: ATUALIZA O CACHE EM MEMÓRIA PARA O REACT NÃO LER DADO VELHO
+                    let state_in = app_clone.state::<AppState>();
+                    let mut mem_cache = state_in.monitoring_cache.lock().await;
+                    *mem_cache = Some(mif_data);
                 }
                 if let Ok(mif_summary) = db.get_monitoring_company_summary().await {
                     if let Ok(json) = serde_json::to_string(&mif_summary) {
@@ -942,6 +949,26 @@ async fn check_for_updates(state: tauri::State<'_, AppState>) -> Result<bool, St
     }
     
     Ok(true)
+}
+
+#[tauri::command]
+fn set_alert_icon(app: AppHandle, alert: bool) {
+    // Usa o binário embutido das imagens (caminho relativo ao arquivo main.rs)
+    let icon_bytes = if alert {
+        include_bytes!("../icons/icon-alert.ico").to_vec()
+    } else {
+        include_bytes!("../icons/icon.ico").to_vec()
+    };
+    
+    let icon = tauri::Icon::Raw(icon_bytes);
+    
+    // Atualiza o ícone da bandeja de notificações (System Tray)
+    let _ = app.tray_handle().set_icon(icon.clone());
+    
+    // Atualiza o ícone da barra de tarefas da janela principal (Taskbar)
+    if let Some(window) = app.get_window("main") {
+        let _ = window.set_icon(icon);
+    }
 }
 
 fn main() {
@@ -1088,7 +1115,7 @@ fn main() {
             fetch_daily_production, trigger_background_sync, check_for_updates,
             debug_trigger_notification, debug_set_tray_status, update_tray_tooltip,
             show_custom_notification, hide_custom_notification, update_tray_tooltip, 
-            open_main_window_at
+            open_main_window_at, set_alert_icon
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

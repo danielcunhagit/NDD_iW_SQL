@@ -39,6 +39,7 @@ pub struct ProjectionData {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[serde(default)] // <--- MÁGICA: Preenche com zero o que faltar no cache antigo!
 pub struct MonitoringData {
     pub mif: i64,
     pub compatible: i64,
@@ -73,7 +74,8 @@ pub struct CompanySummary {
     pub producao: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)] // <--- ADICIONE O Default AQUI
+#[serde(default)] // <--- MÁGICA DE COMPATIBILIDADE AQUI TAMBÉM
 pub struct MonitoringCompanySummary {
     pub empresa: String,
     pub mif: i64,

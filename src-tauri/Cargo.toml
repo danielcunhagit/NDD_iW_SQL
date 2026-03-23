@@ -1,6 +1,6 @@
 [package]
 name = "ndd-sql"
-version = "2.0.0"
+version = "3.0.1"
 description = "Monitoramento RPA"
 authors = ["you"]
 edition = "2021"
@@ -9,7 +9,7 @@ edition = "2021"
 tauri-build = { version = "1", features = [] }
 
 [dependencies]
-tauri = { version = "1", features = [ "system-tray", "notification-all", "shell-open", "updater", "dialog"] }
+tauri = { version = "1", features = [ "system-tray", "notification-all", "shell-open", "updater", "dialog", "icon-ico"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }

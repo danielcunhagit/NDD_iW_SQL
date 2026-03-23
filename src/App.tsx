@@ -1272,28 +1272,31 @@ function App() {
       invoke('update_tray_tooltip', { tooltip: tooltipText }).catch(console.error);
       // ====================================================
 
-      if (isFullySynced && !hasSyncFailed) {
-          let outdated = [];
-          if (data.last_update_ndd !== "N/D" && data.last_update_ndd < targetDateStr) outdated.push("NDD Print");
-          if (data.last_update_iw !== "N/D" && data.last_update_iw < targetDateStr) outdated.push("iW Remote");
-          
-          if (outdated.length > 0) {
-              setOutdatedText(outdated.join(" e o "));
+      // O aviso de dados desatualizados na tela grande só é avaliado se a sincronização não falhou (para não confundir o usuário com dois avisos)
+          if (isFullySynced && !hasSyncFailed) {
+              let outdated = [];
+              if (data.last_update_ndd !== "N/D" && data.last_update_ndd < targetDateStr) outdated.push("NDD Print");
+              if (data.last_update_iw !== "N/D" && data.last_update_iw < targetDateStr) outdated.push("iW Remote");
               
-              // MÁGICA: Só mostra o modal de alerta UMA VEZ POR DIA!
-              const todayStr = new Date().toDateString();
-              const lastWarning = localStorage.getItem('last_data_warning_date');
-              
-              if (lastWarning !== todayStr) {
-                  setShowDataWarning(true);
-                  localStorage.setItem('last_data_warning_date', todayStr);
+              if (outdated.length > 0) {
+                  setOutdatedText(outdated.join(" e o "));
+                  
+                  // MÁGICA: Só mostra o modal de alerta UMA VEZ POR DIA!
+                  const todayStr = new Date().toDateString();
+                  const lastWarning = localStorage.getItem('last_data_warning_date');
+                  
+                  if (lastWarning !== todayStr) {
+                      setShowDataWarning(true);
+                      localStorage.setItem('last_data_warning_date', todayStr);
+                  }
+              } else {
+                  setShowDataWarning(false);
               }
-          } else {
-              setShowDataWarning(false);
           }
 
           // === ROTINA MATINAL CONCLUÍDA: AVALIAÇÃO INTELIGENTE ===
-          if (isMorningRoutine) {
+          // MÁGICA OFFLINE: Retirado da trava de erro! Agora roda SEMPRE que o processo de checagem (com sucesso ou falha) acabar.
+          if (isFullySynced && isMorningRoutine) {
               setIsMorningRoutine(false); 
               
               const mesAtual = new Date().getMonth() + 1;
@@ -1338,7 +1341,7 @@ function App() {
                       production: { 
                           real: (prodMes / 1000000).toFixed(1), 
                           est: (totalEst / 1000000).toFixed(1),
-                          monthName: nomeMesAtual, // <--- AGORA ELE SABE QUEM É!
+                          monthName: nomeMesAtual, 
                           growthPct: pctCrescimento.toFixed(1) 
                       },
                       communication: { 
@@ -1350,17 +1353,22 @@ function App() {
                       },
                       monitoring: { 
                           total: totalBaseMeta, 
-                          registered: monitorados,      // <--- NOVO
-                          ndd: monitoringData?.ndd || 0, // <--- NOVO
-                          iw: monitoringData?.iw || 0,   // <--- NOVO
+                          registered: monitorados,      
+                          ndd: monitoringData?.ndd || 0, 
+                          iw: monitoringData?.iw || 0,   
                           currentPct: currentMifPct, 
                           missing: qtdeAMais, 
                           targetPct: targetPct 
                       }
                   })
               });
+
+              // ---> NOVA MÁGICA DA BOLINHA AQUI <---
+              // Só acende se o usuário NÃO estiver com o painel aberto/em foco na tela
+              if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+                  invoke('set_alert_icon', { alert: true }).catch(console.error);
+              }
           }
-      } // <--- ADICIONE ESTA CHAVE AQUI (Ela fecha a trava de sincronização)
   }, [data, isFullySynced, hasSyncFailed, isMorningRoutine, monitoringData]);
 
   // Auto-limpador inteligente de mensagens do rodapé
@@ -1439,7 +1447,7 @@ function App() {
   };
   
   // ---> LÓGICA DE "O QUE HÁ DE NOVO" <---
-  const APP_VERSION = "3.0.0"; // Dispara a janela de novidades!
+  const APP_VERSION = "3.0.1"; // Dispara a janela de novidades!
   const [showWhatsNew, setShowWhatsNew] = useState(false);
 
   useEffect(() => {
@@ -1566,16 +1574,26 @@ function App() {
   
   // RECUPERADOR DO DIAGRAMA E DAS TABELAS (Desacoplado e Inteligente)
   useEffect(() => {
+      if (isInitialLoad) return; // <--- TRAVA DE OURO: Espera o Rust ligar o banco de dados antes de perguntar!
+
       let isCancelled = false;
+      let retryCount = 0; // Limite de tentativas para não travar no Modo Offline
 
       const tryFetchMIF = () => {
-          // MÁGICA: Removido o bloqueio da aba! Agora ele baixa invisível no fundo desde o 1º segundo.
           if (isCancelled) return;
 
           // 1. Tenta buscar o diagrama principal (Cards)
           if (!monitoringData) {
               invoke<MonitoringData>("fetch_monitoring_data").then(res => {
-                  if (!isCancelled) setMonitoringData(res);
+                  if (!isCancelled) {
+                      // Se vier zerado, tenta até 5 vezes. Se passar disso, aceita para liberar a tela.
+                      if (res.mif === 0 && retryCount < 5 && !hasSyncFailed) {
+                          retryCount++;
+                          setTimeout(tryFetchMIF, 3000);
+                      } else {
+                          setMonitoringData(res);
+                      }
+                  }
               }).catch(() => {
                   if (!isCancelled) setTimeout(tryFetchMIF, 2500); 
               });
@@ -1587,12 +1605,15 @@ function App() {
               invoke<MonitoringCompanySummary[]>("fetch_monitoring_company_summary")
                   .then(summaries => {
                       if (!isCancelled) {
-                          setCompanySummaries(summaries);
-                          setIsLoadingSummaries(false);
+                          if (summaries.length === 0 && retryCount < 5 && !hasSyncFailed) {
+                              setTimeout(tryFetchMIF, 3000);
+                          } else {
+                              setCompanySummaries(summaries);
+                              setIsLoadingSummaries(false);
+                          }
                       }
                   })
                   .catch(() => { 
-                      // Se o banco estiver ocupado, destrava o loading e tenta de novo depois
                       if (!isCancelled) {
                           setIsLoadingSummaries(false);
                           setTimeout(tryFetchMIF, 2500);
@@ -1603,9 +1624,8 @@ function App() {
 
       tryFetchMIF();
       
-      // Limpeza segura: garante que o loading nunca fique preso se você trocar de aba
       return () => { isCancelled = true; setIsLoadingSummaries(false); };
-  }, [currentView, monitoringData, companySummaries.length]);
+  }, [isInitialLoad, currentView, monitoringData, companySummaries.length, hasSyncFailed]);
 
   // Atualiza as empresas quando o ano muda
   useEffect(() => { 
@@ -1746,7 +1766,9 @@ function App() {
             showToast(`Sistema iniciado e pronto para uso.`, 'success');
 
             invoke<MonitoringData>("fetch_monitoring_data")
-                .then(res => { setMonitoringData(res); })
+                .then(res => { 
+                    if (res.mif > 0) setMonitoringData(res); 
+                })
                 .catch(() => console.log("Diagrama na fila de espera..."));
 
         } catch (err) { 
@@ -1840,6 +1862,29 @@ const handleFetchData = async (empresa: string, targetYear: number) => {
           handleFetchData(selectedCompany, year);
       }
   }, [year]);
+
+  // AUTO-LIMPÁVEL: Quando o usuário abre ou foca na janela, apaga a bolinha vermelha
+  useEffect(() => {
+      const clearAlertIcon = () => {
+          invoke('set_alert_icon', { alert: false }).catch(console.error);
+      };
+      
+      const handleVisibility = () => {
+          // Se a janela voltar a ficar visível na tela, limpa o alerta imediatamente
+          if (document.visibilityState === 'visible') {
+              clearAlertIcon();
+          }
+      };
+      
+      // Limpa APENAS quando a janela ganha foco ou sai do estado invisível
+      window.addEventListener('focus', clearAlertIcon);
+      document.addEventListener('visibilitychange', handleVisibility);
+      
+      return () => {
+          window.removeEventListener('focus', clearAlertIcon);
+          document.removeEventListener('visibilitychange', handleVisibility);
+      };
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = e.target.value;
@@ -2213,7 +2258,7 @@ const footerStats = useMemo(() => {
           )}
           
             <div className="splash-version" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              v3.0.0 <span style={{ color: '#455A64' }}>|</span> 
+              v3.0.1 <span style={{ color: '#455A64' }}>|</span> 
               Fonte de Dados: {isUsingLocalDB ? 'Banco Local' : 'Nuvem'} 
               {isUsingLocalDB && !syncProgressText ? <HardDrive size={12} /> : <Cloud size={12} />}
           </div>
@@ -2455,7 +2500,7 @@ const footerStats = useMemo(() => {
                     onMouseOver={(e) => { e.currentTarget.style.background = '#00E5FF'; e.currentTarget.style.color = '#000'; }}
                     onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#00E5FF'; }}
                 >
-                    Começar a usar a v3.0
+                    Começar a usar a v3.0.1
                 </button>
             </div>
         </div>
@@ -2466,7 +2511,7 @@ const footerStats = useMemo(() => {
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
             <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
-                <p className="about-version">Versão 3.0.0</p>
+                <p className="about-version">Versão 3.0.1</p>
                 
                 <div className="about-content">
                     <p style={{textAlign: 'justify', marginBottom: '15px'}}>
@@ -2882,7 +2927,7 @@ const footerStats = useMemo(() => {
 
 
 {/* =========================================================
-            PAINEL DE DESENVOLVEDOR SECRETO (TESTES V3.0.0)
+            PAINEL DE DESENVOLVEDOR SECRETO (TESTES V3.0.1)
             ========================================================= */}
         {showDebugMenu && (
             <div style={{
@@ -2905,7 +2950,16 @@ const footerStats = useMemo(() => {
                 </div>
                 
                 <span style={{ fontSize: '9px', color: '#B0BEC5' }}>Testar Notificações Inteligentes:</span>
-                <button onClick={() => handleManualSync('morning')} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid #00E5FF', color: '#00E5FF' }}>🌅 Iniciar Rotina Real (08:30)</button>
+                <button 
+                    onClick={() => {
+                        showToast("Minimize o app correndo! A rotina vai rodar em 3 segundos...", "info");
+                        setTimeout(() => handleManualSync('morning'), 3000);
+                    }} 
+                    className="page-btn" 
+                    style={{ margin: 0, padding: '6px', fontSize: '10px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid #00E5FF', color: '#00E5FF' }}
+                >
+                    🌅 Iniciar Rotina Real (08:30)
+                </button>
                 <button onClick={() => invoke('debug_trigger_notification', { alertType: 'risk' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#FFD740' }}>⚠️ Risco de Meta</button>
                 <button onClick={() => invoke('debug_trigger_notification', { alertType: 'anomaly' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🚨 Anomalia</button>
                 <button onClick={() => invoke('debug_trigger_notification', { alertType: 'celebration' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#00E676' }}>🏆 Celebração (Meta)</button>
@@ -2915,6 +2969,8 @@ const footerStats = useMemo(() => {
                 <button onClick={() => invoke('debug_set_tray_status', { status: 'success' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#00E676' }}>🟢 Simular: Atualizado</button>
                 <button onClick={() => invoke('debug_set_tray_status', { status: 'syncing' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#FFD740' }}>🟡 Simular: Baixando</button>
                 <button onClick={() => invoke('debug_set_tray_status', { status: 'outdated' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🔴 Simular: Velho</button>
+                <span style={{ fontSize: '9px', color: '#B0BEC5', marginTop: '10px' }}>Testar Sistema de Alerta Visual:</span>
+                <button onClick={() => invoke('set_alert_icon', { alert: true })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🔴 Acender Bolinha de Alerta (Tray/Taskbar)</button>
             </div>
         )}
         {/* ========================================================= */}
