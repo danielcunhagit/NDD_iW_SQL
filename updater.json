@@ -1,11 +1,11 @@
 {
-  "version": "3.0.0",
-  "notes": "A Grande Atualização 3.0 chegou! Smart Sync, Notificações Inteligentes em Carrossel, Checagem em Background e nova UX Executiva.",
-  "pub_date": "2026-03-17T16:00:00Z",
+  "version": "3.0.1",
+  "notes": "Atualização v3.0.1: Motor Offline Inteligente, Nova Interface de Notificações, Previsões Semanais aprimoradas e Correção de Cache.",
+  "pub_date": "2026-03-22T22:58:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM2J5OWl5Y2FUc1FrWWpOeG9IU1k1VlNSczlndTlLbHg0bFZzeVpnSWpwNktXMWNnbEdHellydjdoSFIrMW5mamdpR0JxSG00cU91R21USkptOVppOVFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzczODQwNjUyCWZpbGU6bmRkLXNxbF8zLjAuMF94NjQtc2V0dXAubnNpcy56aXAKYWNFZGZvVElWTmNCTzZKQUsrVjVjRmludmdFYW1nMHM1UHl2cXFDeC9nZjN2ZzlsU1UxS0RHYXNKUlVNQVBQSkZWc29TNU9ReTdObC9KVFovNXJqQkE9PQo=",
-      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v3.0.0/ndd-sql_3.0.0_x64-setup.nsis.zip"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1gvZ210VjNtQU5KV2lYNmg0ZnZrN2hGZUxydjZRSVFmelE2UDJPVVNGSzdsbVF0cFpUQUh0czZJSUIzTVBkTXF0aXFDWjlBNGpZZU9MZGJNc1FtaXc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc0MjMxMzA0CWZpbGU6bmRkLXNxbF8zLjAuMV94NjQtc2V0dXAubnNpcy56aXAKdmViVVhWT2ZJdklBRnBBR1V1QXJRaHpqaDNoeUJNenl2YU84dWFTaWtMdHpCS3NGS284bU5iSEJUZlE4Q3dTVGxuK2dxV1ZQSzBSazBrVVdKZVFERHc9PQo=",
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v3.0.1/ndd-sql_3.0.1_x64-setup.nsis.zip"
     }         
   }
 }
