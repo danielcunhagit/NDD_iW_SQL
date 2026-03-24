@@ -836,3 +836,94 @@ footer {
   color: #546E7A;
   transition: color 0.5s;
 }
+
+/* ==========================================================
+   BOTÃO DE EXPORTAR EXPANSÍVEL (SMART BUTTON - PROFESSIONAL)
+   ========================================================== */
+.btn-export {
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid #00E676;
+  color: #00E676;
+  border-radius: 4px;
+  cursor: pointer;
+  height: 28px;
+  width: 32px; /* Começa pequeno, mostrando apenas o ícone */
+  padding: 0;
+  overflow: hidden; /* Esconde o texto que está sobrando */
+  /* Transições super suaves (CSS Cubic Bezier para toque premium) */
+  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              background 0.2s ease,
+              color 0.2s ease,
+              border-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  position: relative;
+}
+
+/* Centraliza o conteúdo interno */
+.btn-export-inner {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  /* Largura fixa para garantir que o texto não quebre e a transição do Check seja suave */
+  width: 105px; 
+  min-width: 105px;
+  padding-left: 7px; /* Alinhamento perfeito do ícone no modo reduzido */
+  gap: 8px;
+}
+
+/* Estilização do texto com transição de opacidade suave */
+.btn-export-text {
+  font-size: 11px;
+  font-weight: bold;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+/* --- ESTADO 2: HOVER ou ATIVO (EXPANDINDO) --- */
+/* Atualizado para responder ao mouse hover OU ao estado isDialogOpening=true */
+.btn-export:hover:not(.is-success),
+.btn-export.forced-hover:not(.is-success) {
+  width: 105px; /* Expande o botão */
+  background: #00E676;
+  color: #000;
+  box-shadow: 0 4px 10px rgba(0, 230, 118, 0.3);
+}
+
+.btn-export:hover:not(.is-success) .btn-export-text,
+.btn-export.forced-hover:not(.is-success) .btn-export-text {
+  opacity: 1; /* Mostra o texto "EXPORTAR" */
+}
+
+/* Animação do ícone indicando a ação de download */
+.btn-export:hover:not(.is-success) .icon-download,
+.btn-export.forced-hover:not(.is-success) .icon-download {
+  animation: bounceDownload 1s infinite ease-in-out;
+}
+
+@keyframes bounceDownload {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+
+/* --- ESTADO 3: SUCESSO (ARQUIVO SALVO) --- */
+.btn-export.is-success {
+  width: 100px; /* Mantém esticado no sucesso */
+  background: #00E676;
+  color: #000;
+  border-color: #00E676;
+  /* Efeito de "Pop" suave e elástico no sucesso */
+  animation: popSuccess 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.btn-export.is-success .btn-export-text {
+  opacity: 1; /* Mantém o texto "SUCESSO" visível */
+}
+
+@keyframes popSuccess {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); box-shadow: 0 0 15px rgba(0, 230, 118, 0.6); }
+  100% { transform: scale(1); }
+}

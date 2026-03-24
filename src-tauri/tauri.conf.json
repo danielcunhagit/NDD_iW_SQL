@@ -7,11 +7,18 @@
   },
   "package": {
     "productName": "ndd-sql",
-    "version": "3.0.1"
+    "version": "3.0.2"
   },
   "tauri": {
     "allowlist": {
       "all": false,
+      "dialog": {
+        "all": true
+      },
+      "fs": {
+        "writeFile": true,
+        "scope": ["**"]
+      },
       "shell": {
         "all": false,
         "open": true

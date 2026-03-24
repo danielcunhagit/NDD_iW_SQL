@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/api/dialog";
+import { writeTextFile } from "@tauri-apps/api/fs";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import "./App.css";
-import { Info, Cloud, HardDrive, RefreshCw, Database, TrendingUp, Activity, Target, Bell } from "lucide-react";
+import { Info, Cloud, HardDrive, RefreshCw, Database, TrendingUp, Activity, Target, Bell, Download, Check } from "lucide-react";
 
 
 // --- TYPES (Mantidos) ---
@@ -85,13 +87,17 @@ const MonitoringView = ({
     data, 
     dashboardData, 
     companySummaries, 
-    isLoadingSummaries 
+    isLoadingSummaries,
+    showToast
 }: { 
     data: MonitoringData | null;
     dashboardData: DashboardData | null;
     companySummaries: MonitoringCompanySummary[];
     isLoadingSummaries: boolean;
+    showToast: (msg: string, type: 'info' | 'success') => void;
 }) => {
+    const [exportStatus, setExportStatus] = useState<'idle' | 'success'>('idle');
+    const [isDialogOpening, setIsDialogOpening] = useState(false);
     const [targetStr, setTargetStr] = useState<string>("82.0");
     const [showEvolution, setShowEvolution] = useState(false);
     const [evolutionOffset, setEvolutionOffset] = useState(0);
@@ -201,6 +207,69 @@ const MonitoringView = ({
         }
     };
 
+    // --- LÓGICA DE EXPORTAÇÃO EXCEL (CSV) ---
+    const handleExportExcel = async () => {
+        if (!activeDetailFilter || !detailsList.length) return;
+
+        try {
+            // ---> NOVA MÁGICA VISUAL AQUI <---
+            // Avisa o React que a janela do sistema vai abrir. 
+            // O CSS vai usar isso para manter o botão esticado e animando.
+            setIsDialogOpening(true);
+
+            // 1. Abre a janela nativa para o usuário escolher onde salvar (A execução pausa aqui!)
+            const filePath = await save({
+                title: 'Exportar para Excel',
+                defaultPath: `Monitoramento_${filterNames[activeDetailFilter]}_v3.csv`,
+                filters: [{ name: 'Arquivo Excel (CSV)', extensions: ['csv'] }]
+            });
+
+            // O código só continua a partir daqui QUANDO O USUÁRIO FECHAR A JANELA (clicando em Salvar ou Cancelar)
+
+            // ---> RETIRA O ESTADO DE ESPERA <---
+            setIsDialogOpening(false);
+
+            if (!filePath) return; // Usuário fechou a janela sem salvar
+
+            // 2. Monta o conteúdo (Uso de BOM para Excel Brasileiro)
+            let csvContent = '\uFEFF';
+            csvContent += `Empresa;Qtde (${filterNames[activeDetailFilter]});Parque Total (MIF);Monitoradas;Nao Monitoradas;Plataforma NDD;Plataforma iW\n`;
+
+            // 3. Monta as Linhas da Tabela
+            detailsList.forEach(c => {
+                const pctMonitorada = c.mif > 0 ? Math.round((c.registered / c.mif) * 100) : 0;
+                const pctNaoMonitorada = c.mif > 0 ? Math.round((c.not_registered / c.mif) * 100) : 0;
+                
+                const row = [
+                    `"${c.empresa}"`,
+                    c[activeDetailFilter],
+                    c.mif,
+                    `"${c.registered} (${pctMonitorada}%)"`,
+                    `"${c.not_registered} (${pctNaoMonitorada}%)"`,
+                    c.ndd,
+                    c.iw
+                ].join(';');
+                
+                csvContent += row + '\n';
+            });
+
+            // 4. Grava o arquivo fisicamente no disco e DISPARA A ANIMAÇÃO DE SUCESSO!
+            await writeTextFile(filePath, csvContent);
+            
+            setExportStatus('success');
+            showToast("Tabela exportada com sucesso!", "success");
+            
+            // Volta para o ícone padrão após 2.5 segundos
+            setTimeout(() => setExportStatus('idle'), 2500);
+
+        } catch (error) {
+            console.error("Erro ao exportar:", error);
+            // Garante que o estado de espera saia mesmo se houver erro
+            setIsDialogOpening(false); 
+            showToast("Erro ao tentar salvar o arquivo.", "info");
+        }
+    };
+
     const ProCard = ({ id, title, value, total, status = "neutral", hasNext = false }: any) => {
         const pct = total > 0 ? Math.round((value / total) * 100) : 0;
         return (
@@ -284,7 +353,32 @@ const MonitoringView = ({
                         
                         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15}}>
                             <h2 className="about-title">{filterNames[activeDetailFilter]}</h2>
-                            <span style={{color: '#00E5FF', fontWeight: 'bold'}}>{fmtMilhar(detailsList.length)} empresas</span>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '15px'}}>
+                                <span style={{color: '#00E5FF', fontWeight: 'bold'}}>{fmtMilhar(detailsList.length)} empresas</span>
+                                
+                                {/* BOTÃO DE EXPORTAÇÃO ANIMADO E INTELIGENTE */}
+                                <button 
+                                    onClick={handleExportExcel}
+                                    // ---> NOVA MÁGICA NO CLASSNAME <---
+                                    // Adicionamos 'forced-hover' se isDialogOpening for true
+                                    className={`btn-export ${exportStatus === 'success' ? 'is-success' : ''} ${isDialogOpening ? 'forced-hover' : ''}`}
+                                    title="Salvar tabela como arquivo Excel"
+                                    // Desativa o botão enquanto estiver ocupado para evitar duplos cliques
+                                    disabled={isDialogOpening || exportStatus === 'success'}
+                                >
+                                    <div className="btn-export-inner">
+                                        {exportStatus === 'success' ? (
+                                            <Check size={16} strokeWidth={3} />
+                                        ) : (
+                                            <Download size={16} className="icon-download" />
+                                        )}
+                                        <span className="btn-export-text">
+                                            {/* Transição suave do texto controlada pelo CSS */}
+                                            {exportStatus === 'success' ? 'SUCESSO' : 'EXPORTAR'}
+                                        </span>
+                                    </div>
+                                </button>
+                            </div>
                         </div>
                         
                         {isLoadingSummaries ? (
@@ -1162,7 +1256,7 @@ function App() {
   const [panelType, setPanelType] = useState<'detail' | 'summary'>('detail');
   const [activeTab, setActiveTab] = useState<'producing' | 'stopped'>('producing');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 15;
+  const itemsPerPage = 500;
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'total', direction: 'desc' });
   const [panelCache, setPanelCache] = useState<Record<string, any[]>>({});
   const fetchedKeys = useRef<Set<string>>(new Set());
@@ -1447,7 +1541,7 @@ function App() {
   };
   
   // ---> LÓGICA DE "O QUE HÁ DE NOVO" <---
-  const APP_VERSION = "3.0.1"; // Dispara a janela de novidades!
+  const APP_VERSION = "3.0.2"; // Dispara a janela de novidades!
   const [showWhatsNew, setShowWhatsNew] = useState(false);
 
   useEffect(() => {
@@ -2258,7 +2352,7 @@ const footerStats = useMemo(() => {
           )}
           
             <div className="splash-version" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              v3.0.1 <span style={{ color: '#455A64' }}>|</span> 
+              v3.0.2 <span style={{ color: '#455A64' }}>|</span> 
               Fonte de Dados: {isUsingLocalDB ? 'Banco Local' : 'Nuvem'} 
               {isUsingLocalDB && !syncProgressText ? <HardDrive size={12} /> : <Cloud size={12} />}
           </div>
@@ -2458,7 +2552,7 @@ const footerStats = useMemo(() => {
       {showWhatsNew && (
         <div className="about-overlay" onClick={() => setShowWhatsNew(false)} style={{ zIndex: 10000 }}>
             <div className="about-box" style={{ width: '580px', borderTop: '4px solid #00E5FF' }} onClick={e => e.stopPropagation()}>
-                <h2 className="about-title" style={{ color: '#00E5FF', marginBottom: '5px' }}>🚀 A Grande Atualização 3.0</h2>
+                <h2 className="about-title" style={{ color: '#00E5FF', marginBottom: '5px' }}>🚀 A Grande Atualização 3.0.2</h2>
                 <p style={{ fontSize: '12px', color: '#B0BEC5', marginBottom: '20px' }}>Um salto em Experiência do Usuário (UX) e Inteligência de Dados</p>
 
                 <div className="about-content" style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '10px' }}>
@@ -2500,7 +2594,7 @@ const footerStats = useMemo(() => {
                     onMouseOver={(e) => { e.currentTarget.style.background = '#00E5FF'; e.currentTarget.style.color = '#000'; }}
                     onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#00E5FF'; }}
                 >
-                    Começar a usar a v3.0.1
+                    Começar a usar a v3.0.2
                 </button>
             </div>
         </div>
@@ -2511,7 +2605,7 @@ const footerStats = useMemo(() => {
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
             <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
-                <p className="about-version">Versão 3.0.1</p>
+                <p className="about-version">Versão 3.0.2</p>
                 
                 <div className="about-content">
                     <p style={{textAlign: 'justify', marginBottom: '15px'}}>
@@ -2619,7 +2713,15 @@ const footerStats = useMemo(() => {
                                       
                                       {panelType === 'summary' ? (
                                           <>
-                                            <td style={{fontWeight:'bold', color:'#fff', fontSize:11}}>{row.empresa}</td>
+                                            <td 
+                                                style={{
+                                                    fontWeight: 'bold', color: '#fff', fontSize: 11, 
+                                                    maxWidth: '280px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                                                }} 
+                                                title={row.empresa}
+                                            >
+                                                {row.empresa}
+                                            </td>
                                             <td className="val-col status-online">{row.online}</td>
                                             <td className="val-col status-offline">{row.offline}</td>
                                             <td className="val-col total-col">{fmtMilhar(row.producao)}</td>
@@ -2640,15 +2742,41 @@ const footerStats = useMemo(() => {
               )}
           </div>
 
-          {!panelLoading && displayedData.length > 0 && (
-              <div className="pagination">
-                  <span>Pág. {currentPage} de {totalPages} • {displayedData.length} registros</span>
-                  <div>
-                      <button className="page-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Anterior</button>
-                      <button className="page-btn" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Próxima</button>
+          {!panelLoading && displayedData.length > 0 && (() => {
+              // Calcula os índices do primeiro e último item sendo exibidos na página atual
+              const startItem = (currentPage - 1) * itemsPerPage + 1;
+              const endItem = Math.min(currentPage * itemsPerPage, displayedData.length);
+              
+              return (
+                  <div className="pagination" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                          {/* Tag (Badge) destacada para a Página */}
+                          <div style={{ 
+                              background: 'rgba(0, 229, 255, 0.1)', 
+                              border: '1px solid rgba(0, 229, 255, 0.3)', 
+                              borderRadius: '4px', 
+                              padding: '4px 10px', 
+                              color: '#00E5FF', 
+                              fontWeight: 'bold', 
+                              fontSize: '11px', 
+                              letterSpacing: '0.5px' 
+                          }}>
+                              PÁG. {currentPage} / {totalPages}
+                          </div>
+                          
+                          {/* Texto de Contagem de Registros */}
+                          <span style={{ color: '#B0BEC5', fontSize: '12px' }}>
+                              Exibindo <b style={{ color: '#fff' }}>{fmtMilhar(startItem)}</b> a <b style={{ color: '#fff' }}>{fmtMilhar(endItem)}</b> de <b style={{ color: '#fff' }}>{fmtMilhar(displayedData.length)}</b> registros
+                          </span>
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                          <button className="page-btn" style={{ margin: 0 }} disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Anterior</button>
+                          <button className="page-btn" style={{ margin: 0 }} disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Próxima</button>
+                      </div>
                   </div>
-              </div>
-          )}
+              );
+          })()}
       </div>
 
     {/* --- MODAL DO COMPARATIVO SEMANAL --- */}
@@ -2856,6 +2984,7 @@ const footerStats = useMemo(() => {
                     dashboardData={data} 
                     companySummaries={companySummaries}
                     isLoadingSummaries={isLoadingSummaries}
+                    showToast={showToast}
                 /> 
             ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -2927,7 +3056,7 @@ const footerStats = useMemo(() => {
 
 
 {/* =========================================================
-            PAINEL DE DESENVOLVEDOR SECRETO (TESTES V3.0.1)
+            PAINEL DE DESENVOLVEDOR SECRETO (TESTES V3.0.2)
             ========================================================= */}
         {showDebugMenu && (
             <div style={{
