@@ -1,11 +1,11 @@
 {
-  "version": "3.0.1",
-  "notes": "Atualização v3.0.1: Motor Offline Inteligente, Nova Interface de Notificações, Previsões Semanais aprimoradas e Correção de Cache.",
-  "pub_date": "2026-03-22T22:58:00Z",
+  "version": "3.0.2",
+  "notes": "Atualização v3.0.2: Adicionada exportação inteligente para Excel e ampliação da paginação das tabelas para 500 itens, facilitando a análise de grandes volumes de dados.",
+  "pub_date": "2026-03-24T12:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1gvZ210VjNtQU5KV2lYNmg0ZnZrN2hGZUxydjZRSVFmelE2UDJPVVNGSzdsbVF0cFpUQUh0czZJSUIzTVBkTXF0aXFDWjlBNGpZZU9MZGJNc1FtaXc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc0MjMxMzA0CWZpbGU6bmRkLXNxbF8zLjAuMV94NjQtc2V0dXAubnNpcy56aXAKdmViVVhWT2ZJdklBRnBBR1V1QXJRaHpqaDNoeUJNenl2YU84dWFTaWtMdHpCS3NGS284bU5iSEJUZlE4Q3dTVGxuK2dxV1ZQSzBSazBrVVdKZVFERHc9PQo=",
-      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v3.0.1/ndd-sql_3.0.1_x64-setup.nsis.zip"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM2ZndTBXQitBOVU3dGNUdWF2T2EzYUdwRHVLSkIwM1JQendJeEttV1IvTHpya0FnM084YWNYZ21VYXp0bmF4UEg5S3RuTjlrb0UyVzcyUEN4dWI2aGdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc0MzY1NDcyCWZpbGU6bmRkLXNxbF8zLjAuMl94NjQtc2V0dXAubnNpcy56aXAKRDU2c1kvWTNaa2RQcHFYQnU5U0J4d1NVK0hyTUVLWTM2MkNrenpSaU43dUJndEtsTmJ2QXUySllJR1dPY2doNG1NRzlPT1RFK1JueXdkN2ZsMTZyQ0E9PQo=",
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v3.0.2/ndd-sql_3.0.2_x64-setup.nsis.zip"
     }         
   }
 }
