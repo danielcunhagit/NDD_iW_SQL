@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/api/dialog";
+import { save, ask } from "@tauri-apps/api/dialog";
+import { checkUpdate, installUpdate } from "@tauri-apps/api/updater";
+import { relaunch } from "@tauri-apps/api/process";
 import { writeTextFile } from "@tauri-apps/api/fs";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import "./App.css";
@@ -1980,6 +1982,41 @@ const handleFetchData = async (empresa: string, targetYear: number) => {
       };
   }, []);
 
+  // ==========================================================
+  // AUTO-UPDATER SILENCIOSO DO SISTEMA (A cada 6 horas)
+  // ==========================================================
+  useEffect(() => {
+      const verifySystemUpdate = async () => {
+          try {
+              // 1. Pergunta para a nuvem se tem versão nova no updater.json
+              const { shouldUpdate, manifest } = await checkUpdate();
+              
+              if (shouldUpdate) {
+                  // 2. Abre a janela nativa do Windows perguntando se quer instalar
+                  const wantsUpdate = await ask(
+                      `A nova versão ${manifest?.version} do Monitoramento RPA está disponível!\n\nO que há de novo:\n${manifest?.body}\n\nDeseja baixar e instalar a atualização agora? O sistema será reiniciado em alguns segundos.`, 
+                      { title: 'Atualização do Sistema', type: 'info' }
+                  );
+                  
+                  // 3. Se o usuário clicar em "Sim", faz o download e reinicia sozinho!
+                  if (wantsUpdate) {
+                      showToast("Baixando atualização em segundo plano...", "info");
+                      await installUpdate();
+                      await relaunch();
+                  }
+              }
+          } catch (error) {
+              console.error("Erro na rotina de atualização automática do sistema:", error);
+          }
+      };
+
+      // Dispara a cada 6 horas (21.600.000 milissegundos)
+      // Usar 6 horas é mais seguro que 24h caso o computador entre em modo de suspensão
+      const interval = setInterval(verifySystemUpdate, 6 * 60 * 60 * 1000);
+      
+      return () => clearInterval(interval);
+  }, []);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = e.target.value;
       setTempCompany(val); 
@@ -3100,6 +3137,39 @@ const footerStats = useMemo(() => {
                 <button onClick={() => invoke('debug_set_tray_status', { status: 'outdated' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🔴 Simular: Velho</button>
                 <span style={{ fontSize: '9px', color: '#B0BEC5', marginTop: '10px' }}>Testar Sistema de Alerta Visual:</span>
                 <button onClick={() => invoke('set_alert_icon', { alert: true })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🔴 Acender Bolinha de Alerta (Tray/Taskbar)</button>
+
+        {/* --- NOVO BOTÃO DE TESTE DO UPDATER --- */}
+                <span style={{ fontSize: '9px', color: '#B0BEC5', marginTop: '10px' }}>Testar Auto-Updater:</span>
+                <button 
+                    onClick={async () => {
+                        try {
+                            showToast("A procurar atualizações no GitHub...", "info");
+                            const { shouldUpdate, manifest } = await checkUpdate();
+                            
+                            if (shouldUpdate) {
+                                const wantsUpdate = await ask(
+                                    `A nova versão ${manifest?.version} do Monitoramento RPA está disponível!\n\nO que há de novo:\n${manifest?.body}\n\nDeseja testar a transferência e instalação agora?`, 
+                                    { title: 'Teste de Atualização', type: 'info' }
+                                );
+                                
+                                if (wantsUpdate) {
+                                    showToast("A transferir a atualização em segundo plano...", "info");
+                                    await installUpdate();
+                                    await relaunch();
+                                }
+                            } else {
+                                showToast("Nenhuma versão nova encontrada. Já possui a mais recente!", "success");
+                            }
+                        } catch (error) {
+                            console.error("Erro ao testar o updater:", error);
+                            showToast("Falha ao comunicar com o GitHub. Verifique a consola.", "info");
+                        }
+                    }} 
+                    className="page-btn" 
+                    style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#00E676', border: '1px solid #00E676', background: 'rgba(0, 230, 118, 0.1)' }}
+                >
+                    🔄 Forçar Verificação de Atualização
+                </button>
             </div>
         )}
         {/* ========================================================= */}
