@@ -93,6 +93,18 @@ fn hide_custom_notification(app: AppHandle) {
 }
 
 #[tauri::command]
+async fn send_to_matrix(ip: String, payload: serde_json::Value) -> Result<String, String> {
+    let url = format!("http://{}/api/message", ip);
+    let client = reqwest::Client::new();
+
+    // Envia o JSON (payload) exatamente como o React mandar, sem envelopar
+    match client.post(&url).json(&payload).send().await {
+        Ok(_) => Ok("Enviado para a matriz com sucesso!".to_string()),
+        Err(e) => Err(format!("Erro de conexão com a matriz: {}", e)),
+    }
+}
+
+#[tauri::command]
 fn open_main_window_at(app: AppHandle, tab: String) {
     if let Some(window) = app.get_window("main") {
         let _ = window.show();
@@ -971,6 +983,20 @@ fn set_alert_icon(app: AppHandle, alert: bool) {
     }
 }
 
+#[tauri::command]
+fn save_matrix_data_locally(payload: serde_json::Value) -> Result<(), String> {
+    // Salva silenciosamente na pasta Temp do Windows (C:\Users\NOME\AppData\Local\Temp\ndd_matrix_data.json)
+    let path = std::env::temp_dir().join("ndd_matrix_data.json");
+    std::fs::write(path, payload.to_string()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+    async fn fetch_ndd_audit(state: tauri::State<'_, AppState>) -> Result<Vec<models::NdrRawRow>, String> {
+    let db_guard = state.db.lock().await;
+    let db = db_guard.as_ref().ok_or("Banco de dados não conectado")?;
+    db.get_ndd_raw_audit().await.map_err(|e| e.to_string())
+}
+
 fn main() {
     // --- TRAVA DE INSTÂNCIA ÚNICA COM "WAKE-UP" (O CUTUCÃO) ---
     let listener = match std::net::TcpListener::bind("127.0.0.1:58432") {
@@ -1115,7 +1141,7 @@ fn main() {
             fetch_daily_production, trigger_background_sync, check_for_updates,
             debug_trigger_notification, debug_set_tray_status, update_tray_tooltip,
             show_custom_notification, hide_custom_notification, update_tray_tooltip, 
-            open_main_window_at, set_alert_icon
+            open_main_window_at, set_alert_icon, send_to_matrix, save_matrix_data_locally, fetch_ndd_audit
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

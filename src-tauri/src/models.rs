@@ -74,6 +74,16 @@ pub struct CompanySummary {
     pub producao: i64,
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow, Clone)]
+pub struct RawIwMif {
+    pub serial: Option<String>,
+    pub compativel: Option<String>,
+    pub cadastrado: Option<String>,
+    pub possivel: Option<String>,
+    pub status: Option<String>,
+    pub item_code: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)] // <--- ADICIONE O Default AQUI
 #[serde(default)] // <--- MÁGICA DE COMPATIBILIDADE AQUI TAMBÉM
 pub struct MonitoringCompanySummary {
@@ -88,4 +98,45 @@ pub struct MonitoringCompanySummary {
     pub possible_canon: i64,
     pub possible_inter: i64,
     pub not_possible: i64,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow, Clone)]
+#[allow(non_snake_case)]
+pub struct NdrRawRow {
+    pub PrinterDeviceID: Option<String>,
+    pub EnterpriseName_ref: Option<String>,
+    pub EnterpriseID: Option<String>,
+    pub EnterpriseName: Option<String>,
+    pub SiteID: Option<String>,
+    pub SiteName: Option<String>,
+    pub SiteDivisionName: Option<String>,
+    pub PrinterName: Option<String>,
+    pub BrandName: Option<String>,
+    pub ModelName: Option<String>,
+    pub SerialNumber: Option<String>,
+    pub AddressName: Option<String>,
+    pub Location: Option<String>,
+    pub ContactData: Option<String>,
+    pub LastNSLDate: Option<String>,
+    pub Passivel_de_Monitoramento: Option<String>,
+    pub Motivo_Nao_Monitoramento: Option<String>,
+    pub Days_without_meters: Option<i32>,
+    pub primaryKey: Option<String>,
+    pub SerialCountedChar: Option<String>,
+    pub FirstDateTimeRead: Option<String>,
+    pub LastDateTimeRead: Option<String>,
+    pub start_101: Option<i64>, pub end_101: Option<i64>,
+    pub start_102: Option<i64>, pub end_102: Option<i64>,
+    pub start_108: Option<i64>, pub end_108: Option<i64>,
+    pub start_112: Option<i64>, pub end_112: Option<i64>,
+    pub start_113: Option<i64>, pub end_113: Option<i64>,
+    pub start_229: Option<i64>, pub end_229: Option<i64>,
+    pub start_230: Option<i64>, pub end_230: Option<i64>,
+    pub start_321: Option<i64>, pub end_321: Option<i64>,
+    pub start_322: Option<i64>, pub end_322: Option<i64>,
+    pub pb_peq: Option<i64>, pub pb_grande: Option<i64>, pub pb_total: Option<i64>,
+    pub cor_peq: Option<i64>, pub cor_grande: Option<i64>, pub cor_total: Option<i64>,
+    pub total: Option<i64>,
+    pub data: Option<String>,
+    pub Gestao_de_Suprimentos: Option<String>,
 }

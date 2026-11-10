@@ -1,6 +1,6 @@
 [package]
 name = "ndd-sql"
-version = "3.0.2"
+version = "3.0.3"
 description = "Monitoramento RPA"
 authors = ["you"]
 edition = "2021"
@@ -17,6 +17,7 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 tauri-plugin-autostart = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1" }
 sqlx = { version = "=0.6.3", features = ["runtime-tokio-rustls", "mssql", "sqlite", "chrono", "macros", "offline"] }
+reqwest = { version = "0.11", features = ["json"] }
 
 [features]
 # Esta seção exige que a dependência 'tauri' exista acima

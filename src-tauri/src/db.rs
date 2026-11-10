@@ -384,40 +384,25 @@ pub async fn get_monitoring_stats(&self) -> Result<crate::models::MonitoringData
     }
 
     // --- SIDE PANEL ---
-    pub async fn get_active_companies_in_year(&self, year: i32) -> Result<Vec<(String, i64)>, Box<dyn Error + Send + Sync>> {
-        // Nova query que soma a produção P&B e Cor e garante que só traz quem imprimiu de verdade (> 0)
+    // --- SIDE PANEL ---
+    pub async fn get_active_companies_in_year(&self, year: i32) -> Result<Vec<(String, i64)>, Box<dyn std::error::Error + Send + Sync>> {
+        // Nova query que soma a produção e garante que só traz quem imprimiu de verdade (> 0)
         let query = format!(r#"
-            SELECT empresa, SUM(prod) as cnt 
-            FROM (
-                SELECT EnterpriseName as empresa, (CAST(ISNULL(pb_total, 0) as bigint) + CAST(ISNULL(cor_total, 0) as bigint)) as prod 
-                FROM vw_NDD WHERE YEAR(data) = {}
-                
-                UNION ALL
-                
-                SELECT [Ship To Name] as empresa, (CAST(ISNULL(pb_total, 0) as bigint) + CAST(ISNULL(cor_total, 0) as bigint)) as prod 
-                FROM vw_IW_Main WHERE YEAR(data) = {}
-            ) as AllComps
-            GROUP BY empresa 
-            HAVING SUM(prod) > 0
-            ORDER BY empresa
-        "#, year, year);
-        
-        // Importante: Alteramos de i32 para i64 aqui, pois a soma da produção pode ultrapassar o limite do i32 (mais de 2 bilhões)
-        let rows: Vec<(Option<String>, i64)> = sqlx::query_as(&query).fetch_all(&self.pool).await?;
-        
-        let mut map: HashMap<String, i64> = HashMap::new();
-        for (name_opt, cnt) in rows {
-            if let Some(name) = name_opt {
-                let clean = Self::normalize_company_name(&name);
-                if !clean.is_empty() {
-                    *map.entry(clean).or_insert(0) += cnt;
-                }
-            }
-        }
+            SELECT 
+                CAST(EnterpriseName as varchar(255)) as empresa, 
+                SUM(ISNULL(TRY_CAST(total as bigint), 0)) as producao
+            FROM vw_NDD WITH (NOLOCK)
+            WHERE YEAR(data) = {} AND EnterpriseName IS NOT NULL
+            GROUP BY CAST(EnterpriseName as varchar(255))
+            HAVING SUM(ISNULL(TRY_CAST(total as bigint), 0)) > 0
+            ORDER BY CAST(EnterpriseName as varchar(255)) ASC
+        "#, year);
 
-        let mut result: Vec<(String, i64)> = map.into_iter().collect();
-        result.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(result)
+        let rows = sqlx::query_as::<_, (String, i64)>(&query)
+            .fetch_all(&self.pool)
+            .await?;
+            
+        Ok(rows)
     }
 
     pub async fn get_month_company_summary(&self, year: i32, month: i32) -> Result<Vec<crate::models::CompanySummary>, Box<dyn Error + Send + Sync>> {
@@ -635,5 +620,65 @@ pub async fn get_monitoring_stats(&self) -> Result<crate::models::MonitoringData
 
         let records = sqlx::query_as::<_, crate::DailyProd>(&query).fetch_all(&self.pool).await?;
         Ok(records)
+    }
+
+    // A MÁGICA É AQUI: Tiramos a chave '}' que fechava o Database antes da hora, e colocamos lá no final!
+    pub async fn get_ndd_raw_audit(&self) -> Result<Vec<crate::models::NdrRawRow>, Box<dyn Error + Send + Sync>> {
+        // 1. Pega a data mais recente que existe na nuvem de forma ultra-rápida
+        let max_date: Option<String> = sqlx::query_scalar("SELECT CONVERT(varchar, MAX(data), 23) FROM vw_NDD WITH (NOLOCK)")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(None);
+
+        let filter_date = max_date.unwrap_or_else(|| "2020-01-01".to_string());
+
+        // 2. Monta a query com TRY_CAST para não travar se o banco tiver lixo nos números
+        let query = format!(r#"
+            SELECT 
+                CAST(PrinterDeviceID as varchar(255)) as PrinterDeviceID, 
+                CAST(EnterpriseName_ref as varchar(255)) as EnterpriseName_ref, 
+                CAST(EnterpriseID as varchar(255)) as EnterpriseID, 
+                CAST(EnterpriseName as varchar(255)) as EnterpriseName,
+                CAST(SiteID as varchar(255)) as SiteID, 
+                CAST(SiteName as varchar(255)) as SiteName, 
+                CAST(SiteDivisionName as varchar(255)) as SiteDivisionName, 
+                CAST(PrinterName as varchar(255)) as PrinterName, 
+                CAST(BrandName as varchar(255)) as BrandName, 
+                CAST(ModelName as varchar(255)) as ModelName,
+                CAST(SerialNumber as varchar(255)) as SerialNumber, 
+                CAST(AddressName as varchar(255)) as AddressName, 
+                CAST(Location as varchar(255)) as Location, 
+                CAST(ContactData as varchar(255)) as ContactData,
+                CONVERT(varchar, LastNSLDate, 120) as LastNSLDate,
+                CAST([Passivel de Monitoramento] as varchar(50)) as Passivel_de_Monitoramento,
+                CAST([Motivo Nao Monitoramento] as varchar(255)) as Motivo_Nao_Monitoramento,
+                ISNULL(TRY_CAST([Days without meters] as int), 0) as Days_without_meters,
+                CAST(primaryKey as varchar(255)) as primaryKey, 
+                CAST(SerialCountedChar as varchar(255)) as SerialCountedChar,
+                CONVERT(varchar, FirstDateTimeRead, 120) as FirstDateTimeRead,
+                CONVERT(varchar, LastDateTimeRead, 120) as LastDateTimeRead,
+                ISNULL(TRY_CAST(start_101 as bigint), 0) as start_101, ISNULL(TRY_CAST(end_101 as bigint), 0) as end_101, 
+                ISNULL(TRY_CAST(start_102 as bigint), 0) as start_102, ISNULL(TRY_CAST(end_102 as bigint), 0) as end_102, 
+                ISNULL(TRY_CAST(start_108 as bigint), 0) as start_108, ISNULL(TRY_CAST(end_108 as bigint), 0) as end_108,
+                ISNULL(TRY_CAST(start_112 as bigint), 0) as start_112, ISNULL(TRY_CAST(end_112 as bigint), 0) as end_112, 
+                ISNULL(TRY_CAST(start_113 as bigint), 0) as start_113, ISNULL(TRY_CAST(end_113 as bigint), 0) as end_113, 
+                ISNULL(TRY_CAST(start_229 as bigint), 0) as start_229, ISNULL(TRY_CAST(end_229 as bigint), 0) as end_229,
+                ISNULL(TRY_CAST(start_230 as bigint), 0) as start_230, ISNULL(TRY_CAST(end_230 as bigint), 0) as end_230, 
+                ISNULL(TRY_CAST(start_321 as bigint), 0) as start_321, ISNULL(TRY_CAST(end_321 as bigint), 0) as end_321, 
+                ISNULL(TRY_CAST(start_322 as bigint), 0) as start_322, ISNULL(TRY_CAST(end_322 as bigint), 0) as end_322,
+                ISNULL(TRY_CAST(pb_peq as bigint), 0) as pb_peq, ISNULL(TRY_CAST(pb_grande as bigint), 0) as pb_grande, ISNULL(TRY_CAST(pb_total as bigint), 0) as pb_total, 
+                ISNULL(TRY_CAST(cor_peq as bigint), 0) as cor_peq, ISNULL(TRY_CAST(cor_grande as bigint), 0) as cor_grande, ISNULL(TRY_CAST(cor_total as bigint), 0) as cor_total, 
+                ISNULL(TRY_CAST(total as bigint), 0) as total,
+                CONVERT(varchar, data, 23) as data,
+                CAST([Gestao de Suprimentos] as varchar(255)) as Gestao_de_Suprimentos
+            FROM vw_NDD WITH (NOLOCK)
+            WHERE data >= DATEADD(month, -1, DATEFROMPARTS(YEAR(CAST('{}' as date)), MONTH(CAST('{}' as date)), 1))
+            ORDER BY data DESC, EnterpriseName ASC
+        "#, filter_date, filter_date);
+
+        let rows = sqlx::query_as::<_, crate::models::NdrRawRow>(&query)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows)
     }
 }

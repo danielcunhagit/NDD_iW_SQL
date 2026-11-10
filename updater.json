@@ -1,11 +1,11 @@
 {
-  "version": "3.0.2",
-  "notes": "Atualização v3.0.2: Adicionada exportação inteligente para Excel, ampliação da paginação das tabelas para 500 itens e NOVO motor de atualização automática silenciosa em segundo plano.",
-  "pub_date": "2026-03-25T09:00:00Z",
+  "version": "3.0.3",
+  "notes": "Atualização v3.0.3: Persistência inteligente da Meta Alvo e correção do Data Grid de 49 colunas com escudo anti-lixo numérico.",
+  "pub_date": "2026-11-10T12:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1hxcWtBd0ZuUGhjQUlDc2ZXM0MrNWpTUCtTL2J4UGR6T2ZnTmxGOC82WmwwUnBPZlJwaXhIdkJJdXBIY3NtemdETlhyVkk2ZGlsY0R3T3pIMkhYWWc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc0NDQyNjgxCWZpbGU6bmRkLXNxbF8zLjAuMl94NjQtc2V0dXAubnNpcy56aXAKdnV3eklteDA0S3I4VkhHbFltcTJZZXBlM1BXUGhXblZscGF6NWNQWkVsTHlXQW0rQjU0Z1JHdHlYVi8zaUI4OUtxWWJBV1RTNzVZRC9wUndOV0RPRHc9PQo=",
-      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v3.0.2/ndd-sql_3.0.2_x64-setup.nsis.zip"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSQVdaMm8ySjVOM1dUUlhWZ2x0YTN6QUV3bEVSYUF4RkxHa1V6bkZrY01ZclB4elQyNWZ2WTlORDBEdlFtaWJqTWNKZGRNdEtCMUVscUNTWG1rNW5FbjhqbjVtcSt3VlFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MzM0NjYyCWZpbGU6bmRkLXNxbF8zLjAuM194NjQtc2V0dXAubnNpcy56aXAKUTMwMHFtTGJHemJyM3o2a050T2VGUkVkYWh2SG1Dd1JodXR4cWF3bEh2c3h2SEJPVm56OWxSS2JYbEl6Z3pxR2dNa0ZheXh0NUJJeU5POXU3Q0FFQnc9PQo=",
+      "url": "https://github.com/danielcunhagit/NDD_iW_SQL/releases/download/v3.0.3/ndd-sql_3.0.3_x64-setup.nsis.zip"
     }         
   }
 }

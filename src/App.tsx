@@ -10,6 +10,25 @@ import "./App.css";
 import { Info, Cloud, HardDrive, RefreshCw, Database, TrendingUp, Activity, Target, Bell, Download, Check } from "lucide-react";
 
 
+interface NdrRawRow {
+    PrinterDeviceID: string | null; EnterpriseName_ref: string | null; EnterpriseID: string | null;
+    EnterpriseName: string | null; SiteID: string | null; SiteName: string | null;
+    SiteDivisionName: string | null; PrinterName: string | null; BrandName: string | null;
+    ModelName: string | null; SerialNumber: string | null; AddressName: string | null;
+    Location: string | null; ContactData: string | null; LastNSLDate: string | null;
+    Passivel_de_Monitoramento: string | null; Motivo_Nao_Monitoramento: string | null;
+    Days_without_meters: number | null; primaryKey: string | null; SerialCountedChar: string | null;
+    FirstDateTimeRead: string | null; LastDateTimeRead: string | null;
+    start_101: number | null; end_101: number | null; start_102: number | null; end_102: number | null;
+    start_108: number | null; end_108: number | null; start_112: number | null; end_112: number | null;
+    start_113: number | null; end_113: number | null; start_229: number | null; end_229: number | null;
+    start_230: number | null; end_230: number | null; start_321: number | null; end_321: number | null;
+    start_322: number | null; end_322: number | null;
+    pb_peq: number | null; pb_grande: number | null; pb_total: number | null;
+    cor_peq: number | null; cor_grande: number | null; cor_total: number | null;
+    total: number | null; data: string | null; Gestao_de_Suprimentos: string | null;
+}
+
 // --- TYPES (Mantidos) ---
 interface DashboardData {
   production: { source: string; ano: number; mes: number; pb: number; cor: number; devices: number }[];
@@ -100,7 +119,9 @@ const MonitoringView = ({
 }) => {
     const [exportStatus, setExportStatus] = useState<'idle' | 'success'>('idle');
     const [isDialogOpening, setIsDialogOpening] = useState(false);
-    const [targetStr, setTargetStr] = useState<string>("82.0");
+    const [targetStr, setTargetStr] = useState<string>(() => {
+        return localStorage.getItem('mif_target_pct') || "80.0";
+    });
     const [showEvolution, setShowEvolution] = useState(false);
     const [evolutionOffset, setEvolutionOffset] = useState(0);
     const [activeDetailFilter, setActiveDetailFilter] = useState<keyof MonitoringCompanySummary | null>(null);
@@ -488,7 +509,10 @@ const MonitoringView = ({
                     <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
                         <span style={{fontSize: 10, color: '#00E5FF', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: 5}}>Meta Alvo (%)</span>
                         <div style={{display: 'flex', alignItems: 'baseline'}}>
-                            <input type="number" step="0.1" value={targetStr} onChange={(e) => setTargetStr(e.target.value)} style={{ background: 'transparent', border: 'none', borderBottom: '2px solid #00E5FF', color: '#fff', fontSize: 26, fontWeight: 'bold', width: '80px', textAlign: 'center', outline: 'none' }} />
+                            <input type="number" step="0.1" value={targetStr} onChange={(e) => { 
+                                setTargetStr(e.target.value); 
+                                localStorage.setItem('mif_target_pct', e.target.value); 
+                            }} style={{ background: 'transparent', border: 'none', borderBottom: '2px solid #00E5FF', color: '#fff', fontSize: 26, fontWeight: 'bold', width: '80px', textAlign: 'center', outline: 'none' }} />
                         </div>
                     </div>
                     <div style={{width: '1px', height: '40px', background: '#546E7A', margin: '0 5px'}}></div>
@@ -1218,6 +1242,35 @@ export const CustomNotification = () => {
 // ==========================================================
 
 function App() {
+    const auditColumns: { key: keyof NdrRawRow; label: string; isNum?: boolean }[] = [
+      { key: 'data', label: 'Data (Snapshot)' }, { key: 'EnterpriseName', label: 'Empresa' }, 
+      { key: 'SerialNumber', label: 'Nº Série' }, { key: 'ModelName', label: 'Modelo' },
+      { key: 'Days_without_meters', label: 'Dias sem Leitura', isNum: true },
+      { key: 'pb_total', label: 'P&B Total', isNum: true }, { key: 'cor_total', label: 'Cor Total', isNum: true },
+      { key: 'total', label: 'Geral Total', isNum: true }, { key: 'Passivel_de_Monitoramento', label: 'Passível Monit.' },
+      { key: 'Motivo_Nao_Monitoramento', label: 'Motivo Não Monit.' }, { key: 'Gestao_de_Suprimentos', label: 'Gestão Sup.' },
+      { key: 'LastNSLDate', label: 'Última NSL' }, { key: 'BrandName', label: 'Marca' },
+      { key: 'PrinterName', label: 'Nome Impressora' }, { key: 'Location', label: 'Localização' },
+      { key: 'AddressName', label: 'Endereço' }, { key: 'ContactData', label: 'Contato' },
+      { key: 'EnterpriseID', label: 'ID Empresa' }, { key: 'EnterpriseName_ref', label: 'Empresa Ref' },
+      { key: 'SiteID', label: 'ID Site' }, { key: 'SiteName', label: 'Nome Site' },
+      { key: 'SiteDivisionName', label: 'Divisão Site' }, { key: 'PrinterDeviceID', label: 'ID Device' },
+      { key: 'primaryKey', label: 'Primary Key' }, { key: 'SerialCountedChar', label: 'Serial Char' },
+      { key: 'FirstDateTimeRead', label: 'Primeira Leitura' }, { key: 'LastDateTimeRead', label: 'Última Leitura' },
+      { key: 'start_101', label: 'Início 101', isNum: true }, { key: 'end_101', label: 'Fim 101', isNum: true },
+      { key: 'start_102', label: 'Início 102', isNum: true }, { key: 'end_102', label: 'Fim 102', isNum: true },
+      { key: 'start_108', label: 'Início 108', isNum: true }, { key: 'end_108', label: 'Fim 108', isNum: true },
+      { key: 'start_112', label: 'Início 112', isNum: true }, { key: 'end_112', label: 'Fim 112', isNum: true },
+      { key: 'start_113', label: 'Início 113', isNum: true }, { key: 'end_113', label: 'Fim 113', isNum: true },
+      { key: 'start_229', label: 'Início 229', isNum: true }, { key: 'end_229', label: 'Fim 229', isNum: true },
+      { key: 'start_230', label: 'Início 230', isNum: true }, { key: 'end_230', label: 'Fim 230', isNum: true },
+      { key: 'start_321', label: 'Início 321', isNum: true }, { key: 'end_321', label: 'Fim 321', isNum: true },
+      { key: 'start_322', label: 'Início 322', isNum: true }, { key: 'end_322', label: 'Fim 322', isNum: true },
+      { key: 'pb_peq', label: 'P&B Peq.', isNum: true }, { key: 'pb_grande', label: 'P&B Grande', isNum: true },
+      { key: 'cor_peq', label: 'Cor Peq.', isNum: true }, { key: 'cor_grande', label: 'Cor Grande', isNum: true }
+  ];
+
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [splashStatus, setSplashStatus] = useState("Iniciando...");
@@ -1266,6 +1319,64 @@ function App() {
   const [showNoUpdateModal, setShowNoUpdateModal] = useState(false);
   const [isMorningRoutine, setIsMorningRoutine] = useState(false);
   const [showDebugMenu, setShowDebugMenu] = useState(false); // <--- Controla a visibilidade do painel secreto
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [auditData, setAuditData] = useState<NdrRawRow[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditSearch, setAuditSearch] = useState("");
+  const [auditSortKey, setAuditSortKey] = useState<keyof NdrRawRow>('EnterpriseName');
+  const [auditSortDesc, setAuditSortDesc] = useState(false);
+  const [auditPage, setAuditPage] = useState(1);
+  const auditItemsPerPage = 100;
+
+  const handleOpenAudit = async () => {
+      setShowAuditModal(true);
+      setAuditLoading(true);
+      setAuditError(null); // Limpa erros anteriores
+      setAuditPage(1);
+      try {
+          const res = await invoke<NdrRawRow[]>("fetch_ndd_audit");
+          setAuditData(res);
+      } catch (err) {
+          console.error("Erro do backend:", err);
+          setAuditError(String(err)); // Salva o erro para mostrar no modal
+          showToast(`Erro: ${err}`, "info"); 
+      } finally {
+          setAuditLoading(false);
+      }
+  };
+
+  const handleAuditSort = (key: keyof NdrRawRow) => {
+      if (auditSortKey === key) setAuditSortDesc(!auditSortDesc);
+      else { setAuditSortKey(key); setAuditSortDesc(false); }
+  };
+
+  const filteredAuditData = useMemo(() => {
+      let filtered = auditData;
+      if (auditSearch) {
+          const s = auditSearch.toLowerCase();
+          filtered = filtered.filter(row => 
+              (row.EnterpriseName?.toLowerCase().includes(s) || false) ||
+              (row.SerialNumber?.toLowerCase().includes(s) || false) || // <--- A correção com o "?" está aqui
+              (row.ModelName?.toLowerCase().includes(s) || false)
+          );
+      }
+      
+      return filtered.sort((a, b) => {
+          let valA = a[auditSortKey] ?? "";
+          let valB = b[auditSortKey] ?? "";
+          if (valA < valB) return auditSortDesc ? 1 : -1;
+          if (valA > valB) return auditSortDesc ? -1 : 1;
+          return 0;
+      });
+  }, [auditData, auditSearch, auditSortKey, auditSortDesc]);
+
+  const paginatedAuditData = useMemo(() => {
+      const start = (auditPage - 1) * auditItemsPerPage;
+      return filteredAuditData.slice(start, start + auditItemsPerPage);
+  }, [filteredAuditData, auditPage]);
+
+  const auditTotalPages = Math.ceil(filteredAuditData.length / auditItemsPerPage) || 1;
+  // ==========================================================
 
 // AUTO-ATUALIZAÇÃO INTELIGENTE (Sem perder o cache da Visão Consolidada)
   useEffect(() => {
@@ -1543,7 +1654,7 @@ function App() {
   };
   
   // ---> LÓGICA DE "O QUE HÁ DE NOVO" <---
-  const APP_VERSION = "3.0.2"; // Dispara a janela de novidades!
+  const APP_VERSION = "3.0.3"; // Dispara a janela de novidades!
   const [showWhatsNew, setShowWhatsNew] = useState(false);
 
   useEffect(() => {
@@ -1734,6 +1845,78 @@ function App() {
             });
       } 
   }, [year, areCompaniesReady, isInitialLoad]);
+
+  // ==========================================================
+  // GERADOR SILENCIOSO DO ARQUIVO DA MATRIZ (A cada 2 horas)
+  // ==========================================================
+  useEffect(() => {
+    if (!data || isInitialLoad) return;
+
+    const generateMatrixDropFile = async () => {
+      try {
+        // 1. Data Base (Formato DD.MM)
+        let dateStr = "N/D";
+        if (data.last_update_ndd && data.last_update_ndd !== "N/D") {
+          const parts = data.last_update_ndd.split('-');
+          if (parts.length === 3) dateStr = `${parts[2]}.${parts[1]}`; 
+        }
+
+        // 2. Produção Real (Mês Atual)
+        const currentYear = new Date().getFullYear();
+        const currentMonth = new Date().getMonth() + 1;
+        const prodMes = data.production
+          .filter(p => p.ano === currentYear && p.mes === currentMonth)
+          .reduce((acc, curr) => acc + curr.pb + curr.cor, 0);
+        const realStr = (prodMes / 1000000).toFixed(1) + "M";
+
+        // 3. Produção Estimada
+        const estTotal = data.projection.ndd_pb + data.projection.iw_pb + data.projection.ndd_cor + data.projection.iw_cor;
+        const estStr = (estTotal / 1000000).toFixed(1) + "M";
+
+        // 4. Online e Offline
+        let onStr = "0%";
+        let offStr = "0%";
+        const commThisYear = data.communication.filter(c => c.ano === currentYear && (c.connected + c.disconnected) > 0);
+        
+        if (commThisYear.length > 0) {
+          const latestMonth = Math.max(...commThisYear.map(c => c.mes));
+          const totalConn = commThisYear.filter(c => c.mes === latestMonth).reduce((acc, curr) => acc + curr.connected, 0);
+          const totalDisc = commThisYear.filter(c => c.mes === latestMonth).reduce((acc, curr) => acc + curr.disconnected, 0);
+          const totalEqp = totalConn + totalDisc;
+          
+          if (totalEqp > 0) {
+            const pctOn = (totalConn / totalEqp) * 100;
+            onStr = pctOn.toFixed(1) + "%";
+            offStr = (100 - pctOn).toFixed(1) + "%";
+          }
+        }
+
+        // 5. Monta o pacote
+        const payload = {
+          mode: "dashboard",
+          date: dateStr,
+          real: realStr,
+          est: estStr,
+          on: onStr,
+          off: offStr
+        };
+
+        // Salva silenciosamente sem disparar avisos na tela
+        await invoke("save_matrix_data_locally", { payload });
+        console.log("Arquivo da matriz gerado com sucesso no Temp.");
+      } catch (err) {
+        console.error("Erro ao gerar arquivo da matriz:", err);
+      }
+    };
+
+    // Gera a gota logo que os dados terminam de carregar
+    generateMatrixDropFile();
+
+    // Repete a cada 2 horas (7.200.000 ms)
+    const interval = setInterval(generateMatrixDropFile, 2 * 60 * 60 * 1000);
+    return () => clearInterval(interval);
+    
+  }, [data, isInitialLoad]);
 
   // --- NOVOS ESTADOS PARA O MODAL DE RECONEXÃO ---
   const [connectionError, setConnectionError] = useState(false);
@@ -2354,6 +2537,136 @@ const footerStats = useMemo(() => {
   }, [showWeeklyModal, weeklyOffset, source, selectedCompany, data, year]);
   // <--- FIM DA NOVA FUNCIONALIDADE
 
+  // ==========================================================
+  // MOTOR DA MATRIZ DE LED (Playlist Inteligente)
+  // ==========================================================
+  useEffect(() => {
+    // Coloque aqui o IP fixo que apareceu na sua matriz
+    const MATRIX_IP = "192.168.0.25"; 
+
+    // Só inicia a playlist se os dados iniciais do dashboard já carregaram
+    if (!data || isInitialLoad) return;
+
+    let playlistIndex = 0;
+
+    const rotinaMatriz = () => {
+      let mensagem = "";
+
+      // Playlist com 3 slides intercalados
+      if (playlistIndex === 0) {
+        // Slide 1: Saúde do Monitoramento
+        const monitorados = monitoringData?.registered || 0;
+        const total = monitorados + (monitoringData?.possible_canon || 0) + (monitoringData?.possible_inter || 0);
+        const pct = total > 0 ? ((monitorados / total) * 100).toFixed(1) : "0.0";
+        mensagem = `MIF AUDITADO: ${pct}% (${monitorados} EQP)`;
+      } 
+      else if (playlistIndex === 1) {
+        // Slide 2: Resumo de Comunicação
+        // Pega o último mês com dados
+        const currentYear = new Date().getFullYear();
+        const commThisYear = data.communication.filter(c => c.ano === currentYear && (c.connected + c.disconnected) > 0);
+        if (commThisYear.length > 0) {
+          const latestMonth = Math.max(...commThisYear.map(c => c.mes));
+          const online = commThisYear.filter(c => c.mes === latestMonth).reduce((acc, curr) => acc + curr.connected, 0);
+          const offline = commThisYear.filter(c => c.mes === latestMonth).reduce((acc, curr) => acc + curr.disconnected, 0);
+          const totalEqp = online + offline;
+          const pct = totalEqp > 0 ? ((online / totalEqp) * 100).toFixed(1) : "0.0";
+          mensagem = `ONLINE: ${pct}% (OFF: ${offline})`;
+        } else {
+          mensagem = "AGUARDANDO DADOS DE REDE...";
+        }
+      }
+      else if (playlistIndex === 2) {
+        // Slide 3: Frase Motivacional ou Aviso do Sistema
+        if (hasSyncFailed) {
+          mensagem = "AVISO: OPERANDO EM MODO OFFLINE (SEM VPN)";
+        } else {
+          mensagem = "SISTEMA NDD 100% OPERACIONAL. VAMOS NESSA!";
+        }
+      }
+
+      // Envia para o Rust disparar para o ESP8266
+      if (mensagem !== "") {
+        console.log("Enviando para matriz:", mensagem);
+        invoke("send_to_matrix", { ip: MATRIX_IP, text: mensagem }).catch(console.error);
+      }
+
+      // Avança a playlist (0, 1, 2, 0, 1, 2...)
+      playlistIndex = (playlistIndex + 1) % 3;
+    };
+
+    // Dispara a cada 60 segundos (60000 ms)
+    const interval = setInterval(rotinaMatriz, 60000);
+    
+    return () => clearInterval(interval);
+  }, [data, monitoringData, hasSyncFailed, isInitialLoad]);
+
+// ==========================================================
+  // FUNÇÃO DE ENVIO PARA A MATRIZ DE LED (DASHBOARD)
+  // ==========================================================
+  const sendDashboardToMatrix = async () => {
+    const MATRIX_IP = "192.168.0.25"; // Substitua pelo IP fixo que aparece na sua matriz
+
+    if (!data) return;
+
+    // 1. Data Base (Formato DD.MM)
+    let dateStr = "N/D";
+    if (data.last_update_ndd && data.last_update_ndd !== "N/D") {
+      const parts = data.last_update_ndd.split('-'); // Padrão "YYYY-MM-DD"
+      if (parts.length === 3) {
+        dateStr = `${parts[2]}.${parts[1]}`; // Vira "16.04"
+      }
+    }
+
+    // 2. Produção Real (Mês Atual)
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+    const prodMes = data.production
+      .filter(p => p.ano === currentYear && p.mes === currentMonth)
+      .reduce((acc, curr) => acc + curr.pb + curr.cor, 0);
+    const realStr = (prodMes / 1000000).toFixed(1) + "M";
+
+    // 3. Produção Estimada (Projeção Total)
+    const estTotal = data.projection.ndd_pb + data.projection.iw_pb + data.projection.ndd_cor + data.projection.iw_cor;
+    const estStr = (estTotal / 1000000).toFixed(1) + "M";
+
+    // 4. Online e Offline (%)
+    let onStr = "0%";
+    let offStr = "0%";
+    const commThisYear = data.communication.filter(c => c.ano === currentYear && (c.connected + c.disconnected) > 0);
+    
+    if (commThisYear.length > 0) {
+      const latestMonth = Math.max(...commThisYear.map(c => c.mes));
+      const totalConn = commThisYear.filter(c => c.mes === latestMonth).reduce((acc, curr) => acc + curr.connected, 0);
+      const totalDisc = commThisYear.filter(c => c.mes === latestMonth).reduce((acc, curr) => acc + curr.disconnected, 0);
+      const totalEqp = totalConn + totalDisc;
+      
+      if (totalEqp > 0) {
+        const pctOn = (totalConn / totalEqp) * 100;
+        onStr = pctOn.toFixed(1) + "%";
+        offStr = (100 - pctOn).toFixed(1) + "%";
+      }
+    }
+
+    // 5. Monta o pacote e dispara pro Rust
+    const payload = {
+      mode: "dashboard",
+      date: dateStr,
+      real: realStr,
+      est: estStr,
+      on: onStr,
+      off: offStr
+    };
+
+    try {
+      await invoke("send_to_matrix", { ip: MATRIX_IP, payload: payload });
+      showToast("Dados enviados ao letreiro!", "success");
+    } catch (err) {
+      showToast("Letreiro offline: " + err, "info");
+    }
+  };
+
+
   return (
     <>
 {isInitialLoad && (
@@ -2389,7 +2702,7 @@ const footerStats = useMemo(() => {
           )}
           
             <div className="splash-version" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              v3.0.2 <span style={{ color: '#455A64' }}>|</span> 
+              v3.0.3 <span style={{ color: '#455A64' }}>|</span> 
               Fonte de Dados: {isUsingLocalDB ? 'Banco Local' : 'Nuvem'} 
               {isUsingLocalDB && !syncProgressText ? <HardDrive size={12} /> : <Cloud size={12} />}
           </div>
@@ -2589,7 +2902,7 @@ const footerStats = useMemo(() => {
       {showWhatsNew && (
         <div className="about-overlay" onClick={() => setShowWhatsNew(false)} style={{ zIndex: 10000 }}>
             <div className="about-box" style={{ width: '580px', borderTop: '4px solid #00E5FF' }} onClick={e => e.stopPropagation()}>
-                <h2 className="about-title" style={{ color: '#00E5FF', marginBottom: '5px' }}>🚀 A Grande Atualização 3.0.2</h2>
+                <h2 className="about-title" style={{ color: '#00E5FF', marginBottom: '5px' }}>🚀 A Grande Atualização 3.0.3</h2>
                 <p style={{ fontSize: '12px', color: '#B0BEC5', marginBottom: '20px' }}>Um salto em Experiência do Usuário (UX) e Inteligência de Dados</p>
 
                 <div className="about-content" style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '10px' }}>
@@ -2631,7 +2944,7 @@ const footerStats = useMemo(() => {
                     onMouseOver={(e) => { e.currentTarget.style.background = '#00E5FF'; e.currentTarget.style.color = '#000'; }}
                     onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#00E5FF'; }}
                 >
-                    Começar a usar a v3.0.2
+                    Começar a usar a v3.0.3
                 </button>
             </div>
         </div>
@@ -2642,7 +2955,7 @@ const footerStats = useMemo(() => {
         <div className="about-overlay" onClick={() => setShowAbout(false)}>
             <div className="about-box" style={{ width: '450px' }} onClick={e => e.stopPropagation()}>
                 <h2 className="about-title">Monitoramento RPA</h2>
-                <p className="about-version">Versão 3.0.2</p>
+                <p className="about-version">Versão 3.0.3</p>
                 
                 <div className="about-content">
                     <p style={{textAlign: 'justify', marginBottom: '15px'}}>
@@ -2755,9 +3068,9 @@ const footerStats = useMemo(() => {
                                                     fontWeight: 'bold', color: '#fff', fontSize: 11, 
                                                     maxWidth: '280px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
                                                 }} 
-                                                title={row.empresa}
+                                                title={row.EnterpriseName}
                                             >
-                                                {row.empresa}
+                                                {row.EnterpriseName}
                                             </td>
                                             <td className="val-col status-online">{row.online}</td>
                                             <td className="val-col status-offline">{row.offline}</td>
@@ -2979,6 +3292,23 @@ const footerStats = useMemo(() => {
                       Previsões Semanais
                   </button>
               )}
+
+              {/* NOVO: BOTÃO DE AUDITORIA APARECE SÓ NA ABA DE COMUNICAÇÃO */}
+              {currentView === 'communication' && (
+                  <button 
+                      onClick={handleOpenAudit}
+                      style={{ 
+                          background: 'rgba(0, 229, 255, 0.08)', color: '#00E5FF', border: '1px solid rgba(0, 229, 255, 0.15)', 
+                          padding: '6px 14px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', transition: 'all 0.2s ease'
+                      }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(0, 229, 255, 0.15)'; }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(0, 229, 255, 0.08)'; }}
+                  >
+                      <Database size={18} color="#00E5FF" /> 
+                      Auditoria NDD (Data Grid)
+                  </button>
+              )}
           </div>
           
           {/* 3. DIREITA: Filtros (Mais próximos e alinhados ao final) */}
@@ -3137,6 +3467,28 @@ const footerStats = useMemo(() => {
                 <button onClick={() => invoke('debug_set_tray_status', { status: 'outdated' })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🔴 Simular: Velho</button>
                 <span style={{ fontSize: '9px', color: '#B0BEC5', marginTop: '10px' }}>Testar Sistema de Alerta Visual:</span>
                 <button onClick={() => invoke('set_alert_icon', { alert: true })} className="page-btn" style={{ margin: 0, padding: '6px', fontSize: '10px', color: '#EF5350' }}>🔴 Acender Bolinha de Alerta (Tray/Taskbar)</button>
+
+            {/* --- NOVO BLOCO DE TESTE DO LETREIRO --- */}
+        <span style={{ fontSize: '9px', color: '#B0BEC5', marginTop: '10px' }}>Hardware Externo:</span>
+        <button 
+            // ---> A CORREÇÃO É NESTA LINHA AQUI <---
+            onClick={sendDashboardToMatrix} 
+            className="page-btn" 
+            style={{ 
+                margin: 0, 
+                padding: '6px', 
+                fontSize: '10px', 
+                color: '#00E5FF', 
+                border: '1px solid #00E5FF', 
+                background: 'rgba(0, 229, 255, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '5px'
+            }}
+        >
+            <Cloud size={12} /> Forçar Envio para Letreiro
+        </button>
 
         {/* --- NOVO BOTÃO DE TESTE DO UPDATER --- */}
                 <span style={{ fontSize: '9px', color: '#B0BEC5', marginTop: '10px' }}>Testar Auto-Updater:</span>
@@ -3305,9 +3657,118 @@ const footerStats = useMemo(() => {
                       })()}
                   </div>
               </div>
-          </div>
+            </div>
             </footer>
-      </div>
+
+      {/* ==========================================================
+                MODAL DE AUDITORIA NDD (CORRIGIDO)
+                ========================================================== */}
+            {showAuditModal && (
+                <div className="about-overlay" style={{ zIndex: 10000, padding: '15px' }}>
+                    <div className="about-box" style={{ width: '100%', height: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', borderTop: '4px solid #00E5FF', padding: '20px' }} onClick={e => e.stopPropagation()}>
+                        
+                        {/* CABEÇALHO COM BOTÃO VOLTAR */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                                {/* NOVO BOTÃO VOLTAR */}
+                                <button 
+                                    onClick={() => setShowAuditModal(false)}
+                                    style={{
+                                        background: 'rgba(255,255,255,0.05)', border: '1px solid #455A64', color: '#fff',
+                                        padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', display: 'flex', 
+                                        alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: 'bold'
+                                    }}
+                                >
+                                    ← VOLTAR
+                                </button>
+                                <div>
+                                    <h2 className="about-title" style={{ color: '#00E5FF', margin: 0, fontSize: '20px' }}>Auditoria Completa: NDD (Maio / Abril)</h2>
+                                    <span style={{ color: '#B0BEC5', fontSize: '11px' }}>Tabela extraída diretamente da nuvem com as 49 colunas oficiais.</span>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                <input 
+                                    type="text" 
+                                    placeholder="🔍 Filtrar por Série, Empresa ou Modelo..." 
+                                    value={auditSearch} 
+                                    onChange={(e) => { setAuditSearch(e.target.value); setAuditPage(1); }}
+                                    style={{ background: '#263238', border: '1px solid #546E7A', color: '#fff', padding: '7px 12px', borderRadius: '4px', width: '320px', outline: 'none' }}
+                                />
+                                <button className="close-btn" style={{ fontSize: '26px', color: '#EF5350', background: 'transparent', border: 'none', cursor: 'pointer' }} onClick={() => setShowAuditModal(false)}>×</button>
+                            </div>
+                        </div>
+
+                        {/* ÁREA DA TABELA (COM SCROLL HORIZONTAL) */}
+                        <div style={{ flex: 1, overflow: 'auto', border: '1px solid #455A64', borderRadius: '4px', background: 'rgba(0,0,0,0.3)' }}>
+                            <table className="detail-table" style={{ margin: 0, borderCollapse: 'collapse', whiteSpace: 'nowrap' }}>
+                                <thead style={{ position: 'sticky', top: 0, zIndex: 20, background: '#37474F', boxShadow: '0 2px 5px rgba(0,0,0,0.5)' }}>
+                                    <tr>
+                                        {auditColumns.map(col => (
+                                            <th key={col.key} onClick={() => handleAuditSort(col.key)} style={{ cursor: 'pointer', padding: '10px 15px', textAlign: col.isNum ? 'right' : 'left' }}>
+                                                {col.label} {auditSortKey === col.key ? (auditSortDesc ? '▼' : '▲') : ''}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {auditLoading && (
+                                        <tr>
+                                            <td colSpan={auditColumns.length} style={{ textAlign: 'center', padding: '100px' }}>
+                                                <div className="loading-spinner" style={{ margin: '0 auto 15px', width: '40px', height: '40px' }}></div>
+                                                <div style={{ color: '#00E5FF', fontWeight: 'bold' }}>Solicitando 49 colunas à nuvem...</div>
+                                                <div style={{ color: '#B0BEC5', fontSize: '11px', marginTop: '5px' }}>Isso pode levar alguns segundos.</div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                    
+                                    {!auditLoading && auditError && (
+                                        <tr>
+                                            <td colSpan={auditColumns.length} style={{ textAlign: 'center', padding: '60px' }}>
+                                                <div style={{ color: '#EF5350', fontSize: '24px', marginBottom: '10px' }}>⚠️ Falha na Consulta</div>
+                                                <div style={{ background: 'rgba(239, 83, 80, 0.1)', color: '#EF5350', padding: '15px', borderRadius: '6px', border: '1px solid #EF5350', display: 'inline-block', maxWidth: '80%', fontFamily: 'monospace', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+                                                    {auditError}
+                                                </div>
+                                                <div style={{ marginTop: '20px' }}>
+                                                    <button onClick={handleOpenAudit} className="page-btn" style={{ background: '#EF5350', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}>Tentar Novamente</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+
+                                    {!auditLoading && !auditError && paginatedAuditData.length === 0 && (
+                                        <tr>
+                                            <td colSpan={auditColumns.length} style={{ textAlign: 'center', padding: '50px', color: '#B0BEC5' }}>Nenhum dado encontrado para o período.</td>
+                                        </tr>
+                                    )}
+
+                                    {!auditLoading && !auditError && paginatedAuditData.map((row, idx) => (
+                                        <tr key={idx} style={{ background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                                            {auditColumns.map(col => (
+                                                <td key={col.key} style={{ padding: '8px 15px', textAlign: col.isNum ? 'right' : 'left', color: col.key === 'SerialNumber' ? '#00E5FF' : (col.isNum ? '#FFD740' : '#fff'), fontSize: '11px' }}>
+                                                    {col.isNum ? (row[col.key] != null ? fmtMilhar(row[col.key] as number) : "0") : String(row[col.key] || "")}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* RODAPÉ */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                            <div style={{ color: '#B0BEC5', fontSize: '12px' }}>
+                                📑 <b>{fmtMilhar(filteredAuditData.length)}</b> linhas carregadas. Utilize o scroll lateral para ver os medidores.
+                            </div>
+                            <div className="pagination" style={{ display: 'flex', gap: '10px' }}>
+                                <button className="page-btn" disabled={auditPage === 1} onClick={() => setAuditPage(p => p - 1)}>Anterior</button>
+                                <button className="page-btn" disabled={auditPage === auditTotalPages} onClick={() => setAuditPage(p => p + 1)}>Próxima</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
       )}
     </>
   );
